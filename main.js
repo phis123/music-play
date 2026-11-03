@@ -157,7 +157,11 @@ ipcMain.handle('dialog:pickFolder', async () => {
 
 // ---------- 内置网易云 API ----------
 ipcMain.handle('net:songs', async (_e, kw) => netapi.searchSongs(kw))
-ipcMain.handle('net:voices', async (_e, kw) => netapi.searchVoices(kw))
+ipcMain.handle('net:voices', async (_e, payload) => {
+  // payload 可以是字符串（播客 tab）或 { name, artist }（选中歌曲后找声音）
+  if (typeof payload === 'string') return netapi.searchVoicesSmart(payload, '')
+  return netapi.searchVoicesSmart(payload.name, payload.artist)
+})
 ipcMain.handle('lyrics:auto', async (_e, { title, artist, filePath }) => {
   try {
     const r = await netapi.autoLyric({ title, artist })
