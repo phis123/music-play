@@ -1,5 +1,5 @@
 // music-play · 主进程
-const { app, BrowserWindow, ipcMain, dialog } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, screen, globalShortcut } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const fsp = fs.promises
@@ -169,6 +169,62 @@ ipcMain.on('win:toggle-max', () => {
 })
 ipcMain.on('win:close', () => win && win.close())
 
+
+// ---------- 悬浮歌词窗 ----------
+let floatWin = null
+
+function createFloatWindow() {
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize
+  const w = 900, h = 150
+  floatWin = new BrowserWindow({
+    width: w,
+    height: h,
+    x: Math.round((width - w) / 2),
+    y: height - h - 80,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: true,
+    movable: true,
+    hasShadow: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+  floatWin.setAlwaysOnTop(true, 'screen-saver')
+  floatWin.setVisibleOnAllWorkspaces(true)
+  floatWin.loadFile(path.join(__dirname, 'renderer', 'float.html'))
+  floatWin.on('closed', () => { floatWin = null; floatLocked = false })
+  return floatWin
+}
+
+ipcMain.handle('float:toggle', () => {
+  if (floatWin) { floatWin.close(); floatWin = null; return false }
+  createFloatWindow()
+  return true
+})
+ipcMain.handle('float:isOpen', () => !!floatWin)
+ipcMain.on('float:push', (_e, payload) => {
+  if (floatWin && !floatWin.isDestroyed()) floatWin.webContents.send('float:update', payload)
+})
+ipcMain.on('float:lock', (_e, locked) => setFloatLock(locked))
+ipcMain.on('float:close', () => {
+  if (floatWin && !floatWin.isDestroyed()) floatWin.close()
+})
+ipcMain.on('float:resize', (_e, h) => {
+  if (floatWin && !floatWin.isDestroyed()) {
+    const b = floatWin.getBounds()
+    floatWin.setBounds({ x: b.x, y: b.y + (b.height - h), width: b.width, height: h })
+  }
+})
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1200, height: 780,
@@ -184,8 +240,30 @@ function createWindow() {
   })
   win.setMenuBarVisibility(false)
   win.once('ready-to-show', () => win.show())
+  // 主窗关闭时一并关掉悬浮歌词，避免留下幽灵窗口
+  win.on('closed', () => {
+    if (floatWin && !floatWin.isDestroyed()) floatWin.close()
+    win = null
+  })
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'))
 }
 
-app.whenReady().then(createWindow)
+let floatLocked = false
+function setFloatLock(locked) {
+  floatLocked = !!locked
+  if (floatWin && !floatWin.isDestroyed()) {
+    floatWin.setIgnoreMouseEvents(floatLocked, { forward: true })
+    floatWin.webContents.send('float:locked', floatLocked)
+  }
+}
+
+app.whenReady().then(() => {
+  createWindow()
+  // Ctrl+Alt+L：悬浮歌词 锁定/解锁（锁定后鼠标穿透，只能靠这个解锁）
+  globalShortcut.register('Control+Alt+L', () => {
+    if (!floatWin) return
+    setFloatLock(!floatLocked)
+  })
+})
+app.on('will-quit', () => globalShortcut.unregisterAll())
 app.on('window-all-closed', () => app.quit())
