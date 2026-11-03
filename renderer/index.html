@@ -49,6 +49,7 @@
     <div class="lp-head">
       <button id="lpBack" title="返回（Esc）">←</button>
       <span class="lp-head-title">歌词</span>
+      <span id="lpOff" class="chip" title="歌词偏移：按 [ 减 0.1s，按 ] 加 0.1s">偏移 0.0s</span>
       <span id="lpSrc" class="chip">—</span>
     </div>
     <div class="lp-body">
@@ -106,6 +107,7 @@
   </div>
 
   <audio id="audio" preload="metadata"></audio>
+  <audio id="previewAudio" preload="none"></audio>
 </footer>
 
 <script src="js/app.js"></script>
