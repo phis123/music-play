@@ -1,14 +1,8 @@
-// music-play · 主进程（P1 骨架）
+// music-play · 主进程
 const { app, BrowserWindow, ipcMain, dialog } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const fsp = fs.promises
-// music-metadata v10+ 是纯 ESM，只能用动态 import
-let _mm = null
-async function mmModule() {
-  if (!_mm) _mm = await import('music-metadata')
-  return _mm
-}
 
 const AUDIO_EXT = new Set(['.mp3', '.flac', '.wav', '.ogg', '.m4a', '.aac', '.opus'])
 const DEFAULT_ROOT = process.env.MUSIC_ROOT ||
@@ -16,6 +10,13 @@ const DEFAULT_ROOT = process.env.MUSIC_ROOT ||
 
 let win = null
 let root = DEFAULT_ROOT
+
+// music-metadata v10+ 是纯 ESM，只能动态 import
+let _mm = null
+async function mmModule() {
+  if (!_mm) _mm = await import('music-metadata')
+  return _mm
+}
 
 async function walk(dir, out, depth = 0) {
   if (depth > 8) return
@@ -28,7 +29,7 @@ async function walk(dir, out, depth = 0) {
   }
 }
 
-// ---------- LRC 解析（支持「同时间戳两行」的双语写法） ----------
+// ---------- LRC 解析：同时间戳（±30ms）相邻两行 → 原文/译文配对 ----------
 function parseLrc(text) {
   const rows = []
   for (const raw of text.split(/\r?\n/)) {
@@ -39,7 +40,6 @@ function parseLrc(text) {
     if (body) rows.push({ t: ms, text: body })
   }
   rows.sort((a, b) => a.t - b.t)
-  // 时间戳相同（±30ms）的相邻两行 → 视为「原文/译文」配对
   const out = []
   for (const r of rows) {
     const prev = out[out.length - 1]
@@ -58,22 +58,22 @@ ipcMain.handle('library:scan', async (_e, dir) => {
   root = target
   const files = []
   await walk(target, files)
+  const mm = await mmModule().catch(() => null)
   const tracks = []
-  for (const f of files.slice(0, 3000)) {
+  for (const f of files.slice(0, 5000)) {
     let title = path.basename(f, path.extname(f))
-    let artist = '', album = '', duration = 0, hasLrc = false
-    try {
-      const mm = await mmModule()
-      const meta = await mm.parseFile(f, { duration: true, skipCovers: true })
-      title = meta.common.title || title
-      artist = meta.common.artist || ''
-      album = meta.common.album || ''
-      duration = meta.format.duration || 0
-      hasLrc = !!(meta.common.lyrics && meta.common.lyrics.length)
-    } catch { /* 读不到标签就退回文件名 */ }
+    let artist = '', album = '', duration = 0
+    if (mm) {
+      try {
+        const meta = await mm.parseFile(f, { duration: true, skipCovers: true })
+        title = meta.common.title || title
+        artist = meta.common.artist || ''
+        album = meta.common.album || ''
+        duration = meta.format.duration || 0
+      } catch { /* 退回文件名 */ }
+    }
     const lrcPath = path.join(path.dirname(f), path.basename(f, path.extname(f)) + '.lrc')
-    if (fs.existsSync(lrcPath)) hasLrc = true
-    tracks.push({ path: f, title, artist, album, duration, hasLrc })
+    tracks.push({ path: f, title, artist, album, duration, hasLrc: fs.existsSync(lrcPath) })
   }
   tracks.sort((a, b) => a.title.localeCompare(b.title, 'zh'))
   return { root: target, tracks }
@@ -106,12 +106,21 @@ ipcMain.handle('app:info', () => ({
   root,
 }))
 
+// ---------- 无边框窗口控制 ----------
+ipcMain.on('win:minimize', () => win && win.minimize())
+ipcMain.on('win:toggle-max', () => {
+  if (!win) return
+  win.isMaximized() ? win.unmaximize() : win.maximize()
+})
+ipcMain.on('win:close', () => win && win.close())
+
 function createWindow() {
   win = new BrowserWindow({
-    width: 1180, height: 760,
-    minWidth: 900, minHeight: 600,
-    backgroundColor: '#0f0f12',
-    title: 'music-play',
+    width: 1200, height: 780,
+    minWidth: 960, minHeight: 620,
+    frame: false,
+    backgroundColor: '#121216',
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -119,6 +128,7 @@ function createWindow() {
     },
   })
   win.setMenuBarVisibility(false)
+  win.once('ready-to-show', () => win.show())
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'))
 }
 
