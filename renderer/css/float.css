@@ -1,0 +1,86 @@
+* { box-sizing: border-box; margin: 0; }
+
+html, body {
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  user-select: none;
+}
+
+#wrap {
+  position: relative;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 8px 18px;
+  -webkit-app-region: drag;
+}
+
+#lines {
+  max-width: 100%;
+  padding: 10px 26px;
+  border-radius: 14px;
+  background: rgba(16, 16, 22, .52);
+  backdrop-filter: blur(8px);
+  text-align: center;
+  transition: background .2s;
+}
+
+#wrap:hover #lines { background: rgba(16, 16, 22, .68); }
+
+#en {
+  font-size: 15px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, .72);
+  min-height: 0;
+}
+#en:empty { display: none; }
+
+#zh {
+  font-size: 22px;
+  line-height: 1.45;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, .55);
+}
+
+/* 控制按钮 */
+.ctrl {
+  position: absolute;
+  top: 2px;
+  right: 6px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity .18s;
+  -webkit-app-region: no-drag;
+}
+#wrap:hover .ctrl { opacity: 1; }
+.ctrl button {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, .16);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ctrl button:hover { background: rgba(236, 65, 65, .85); }
+
+/* 锁定态 */
+#hint {
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: rgba(255, 255, 255, .55);
+  opacity: 0;
+  transition: opacity .2s;
+  white-space: nowrap;
+}
+body.locked #hint { opacity: 1; }
+body.locked .ctrl { display: none; }
+body.locked #wrap { cursor: default; }
