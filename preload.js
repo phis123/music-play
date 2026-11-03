@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('api', {
   scan: (dir) => ipcRenderer.invoke('library:scan', dir),
   lyrics: (filePath) => ipcRenderer.invoke('lyrics:get', filePath),
+  cover: (filePath) => ipcRenderer.invoke('cover:get', filePath),
   pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
   info: () => ipcRenderer.invoke('app:info'),
   winMin: () => ipcRenderer.send('win:minimize'),
