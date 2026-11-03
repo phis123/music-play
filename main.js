@@ -1,5 +1,6 @@
 // music-play · 主进程
 const { app, BrowserWindow, ipcMain, dialog, screen, globalShortcut, Tray, Menu, nativeImage } = require('electron')
+const netapi = require('./netapi')
 const path = require('path')
 const fs = require('fs')
 const fsp = fs.promises
@@ -153,6 +154,12 @@ ipcMain.handle('dialog:pickFolder', async () => {
   const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'] })
   return r.canceled ? null : r.filePaths[0]
 })
+
+// ---------- 内置网易云 API ----------
+ipcMain.handle('net:songs', async (_e, kw) => netapi.searchSongs(kw))
+ipcMain.handle('net:voices', async (_e, kw) => netapi.searchVoices(kw))
+ipcMain.handle('net:preview', async (_e, trackId) => netapi.trackUrl(trackId))
+ipcMain.handle('net:download', async (_e, payload) => netapi.downloadVoice({ ...payload, dir: root }))
 
 ipcMain.handle('app:info', () => ({
   version: app.getVersion(),
@@ -334,6 +341,7 @@ app.whenReady().then(() => {
   createWindow()
   createTray()
   registerUnlockShortcut()
+  netapi.ensureServer().catch((e) => console.warn('[ncm] 启动失败:', e.message))
 })
 app.on('will-quit', () => globalShortcut.unregisterAll())
 app.on('window-all-closed', () => app.quit())
