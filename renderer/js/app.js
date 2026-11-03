@@ -3,6 +3,9 @@ const $ = (s) => document.querySelector(s)
 const $$ = (s) => Array.from(document.querySelectorAll(s))
 const audio = $('#audio')
 
+const ICON_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.6v12.8a.9.9 0 0 0 1.38.77l10-6.4a.9.9 0 0 0 0-1.54l-10-6.4A.9.9 0 0 0 8 5.6z"/></svg>'
+const ICON_PAUSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7.2" y="5" width="3.4" height="14" rx="1.4"/><rect x="13.4" y="5" width="3.4" height="14" rx="1.4"/></svg>'
+
 const state = {
   tracks: [],
   cur: -1,
@@ -21,6 +24,44 @@ const cleanTitle = (t) => String(t || '').replace(/^\d{1,3}\s*[-_.、)\]]\s*/, '
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 const toFileUrl = (p) => 'file:///' + String(p).replace(/\\/g, '/').split('/')
   .map((seg, i) => (i === 0 ? seg : encodeURIComponent(seg))).join('/')
+
+/* ---------------- 封面加载队列（限并发） ---------------- */
+const coverQ = []
+let coverBusy = 0
+const coverCache = new Map()
+
+function pumpCover() {
+  while (coverBusy < 3 && coverQ.length) {
+    const job = coverQ.shift()
+    coverBusy++
+    const finish = () => { coverBusy--; pumpCover() }
+    if (coverCache.has(job.path)) {
+      job.apply(coverCache.get(job.path))
+      coverBusy--
+      continue
+    }
+    window.api.cover(job.path).then((url) => {
+      coverCache.set(job.path, url)
+      job.apply(url)
+    }).catch(() => {}).finally(finish)
+  }
+}
+function loadCover(path, apply) {
+  coverQ.push({ path, apply })
+  pumpCover()
+}
+const setCover = (el, url) => {
+  if (!el) return
+  if (url) {
+    el.style.backgroundImage = `url("${url}")`
+    el.style.backgroundSize = 'cover'
+    el.style.backgroundPosition = 'center'
+    el.classList.add('has-cover')
+  } else {
+    el.style.backgroundImage = ''
+    el.classList.remove('has-cover')
+  }
+}
 
 /* ---------------- 视图 ---------------- */
 function viewHome() {
@@ -51,7 +92,7 @@ function viewLocal() {
   const rows = state.tracks.map((t, i) => `
     <div class="track-row ${i === state.cur ? 'active' : ''}" data-i="${i}">
       <div class="idx">${i + 1}</div>
-      <div class="cov"></div>
+      <div class="cov" data-cov="${i}"></div>
       <div class="tt">${esc(cleanTitle(t.title))}${t.hasLrc ? '<span class="badge">词</span>' : ''}</div>
       <div class="ar">${esc(t.artist || '未知艺人')}</div>
       <div class="du">${fmt(t.duration)}</div>
@@ -81,11 +122,8 @@ function render() {
   const fn = routes[hash] || viewHome
   $('#view').innerHTML = fn()
   $('#view').scrollTop = 0
-
-  // 侧栏选中态
   $$('.nav-item').forEach((el) => el.classList.toggle('active', el.dataset.route === hash))
 
-  // 视图内事件
   if (hash === '#/home') {
     const input = $('#searchInput')
     input?.addEventListener('keydown', (e) => {
@@ -98,6 +136,11 @@ function render() {
   }
   if (hash === '#/local') {
     $$('.track-row').forEach((el) => el.addEventListener('click', () => play(+el.dataset.i)))
+    // 懒加载列表封面
+    $$('[data-cov]').forEach((el) => {
+      const t = state.tracks[+el.dataset.cov]
+      if (t) loadCover(t.path, (url) => setCover(el, url))
+    })
   }
 }
 
@@ -110,18 +153,24 @@ async function play(i) {
   audio.src = toFileUrl(t.path)
   audio.play().catch((e) => console.warn('播放失败', e))
 
-  $('#pbTitle').textContent = cleanTitle(t.title)
+  const title = cleanTitle(t.title)
+  $('#pbTitle').textContent = title
   $('#pbArtist').textContent = t.artist || '未知艺人'
-  $('#lpTitle').textContent = cleanTitle(t.title)
+  $('#lpTitle').textContent = title
   $('#lpArtist').textContent = t.artist || '未知艺人'
 
-  if (location.hash === '#/local' || !location.hash) render()
-  else $$('.track-row').forEach((el) => el.classList.toggle('active', +el.dataset.i === i))
+  setCover($('#pbCover'), '')
+  setCover($('#lpCover'), '')
+  loadCover(t.path, (url) => {
+    setCover($('#pbCover'), url)
+    setCover($('#lpCover'), url)
+  })
+
+  $$('.track-row').forEach((el) => el.classList.toggle('active', +el.dataset.i === i))
 
   const lyr = await window.api.lyrics(t.path)
   state.lines = lyr.lines || []
-  const label = lyr.source === 'lrc' ? '旁挂 LRC' : lyr.source === 'embedded' ? '内嵌歌词' : '无歌词'
-  $('#lpSrc').textContent = label
+  $('#lpSrc').textContent = lyr.source === 'lrc' ? '旁挂 LRC' : lyr.source === 'embedded' ? '内嵌歌词' : '无歌词'
   renderLyrics()
 }
 
@@ -176,9 +225,12 @@ function closeLyrics() {
   $('#lyricsPage').classList.add('hidden')
 }
 
-/* ---------------- 事件绑定 ---------------- */
+/* ---------------- 事件 ---------------- */
+function setPlayIcon(playing) {
+  $('#pbPlay').innerHTML = playing ? ICON_PAUSE : ICON_PLAY
+}
+
 function bindGlobal() {
-  // 窗口按钮
   $$('.tb-btns button').forEach((b) => b.addEventListener('click', () => {
     const act = b.dataset.win
     if (act === 'min') window.api.winMin()
@@ -186,11 +238,9 @@ function bindGlobal() {
     else if (act === 'close') window.api.winClose()
   }))
 
-  // 侧栏导航
   $$('.nav-item').forEach((el) => el.addEventListener('click', () => { location.hash = el.dataset.route }))
   $('#btnNewPlaylist')?.addEventListener('click', () => { location.hash = '#/playlist/1' })
 
-  // 播放条
   $('#pbPlay').addEventListener('click', () => {
     if (state.cur < 0 && state.tracks.length) return play(0)
     audio.paused ? audio.play() : audio.pause()
@@ -212,7 +262,6 @@ function bindGlobal() {
     }
   })
 
-  // 音频事件
   audio.addEventListener('timeupdate', () => {
     const dur = audio.duration || 0
     $('#pbCur').textContent = fmt(audio.currentTime)
@@ -220,11 +269,13 @@ function bindGlobal() {
     if (dur > 0) $('#pbSeek').value = String(Math.round((audio.currentTime / dur) * 1000))
     syncLyrics(false)
   })
-  audio.addEventListener('play', () => { $('#pbPlay').textContent = '⏸' })
-  audio.addEventListener('pause', () => { $('#pbPlay').textContent = '▶' })
+  audio.addEventListener('play', () => setPlayIcon(true))
+  audio.addEventListener('pause', () => setPlayIcon(false))
   audio.addEventListener('ended', () => {
     if (state.cur + 1 < state.tracks.length) play(state.cur + 1)
   })
+
+  setPlayIcon(false)
 }
 
 /* ---------------- 启动 ---------------- */
