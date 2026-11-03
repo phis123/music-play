@@ -33,7 +33,10 @@ html, body {
   border-radius: 6px;
   background: rgba(28, 28, 34, .55);
   -webkit-app-region: drag;
+  opacity: 0;
+  transition: opacity .18s;
 }
+#wrap:hover .drag { opacity: 1; }
 .drag::after {
   content: "⠿ 拖动";
   position: absolute;
@@ -169,3 +172,4 @@ body.locked #panel { display: none; }
 /* 锁定后必须取消拖动区，否则仍能拖动窗口 */
 body.locked #lines,
 body.locked .drag { -webkit-app-region: no-drag; }
+body.locked .drag { display: none !important; }
