@@ -1,0 +1,18 @@
+{
+  "name": "music-play",
+  "version": "0.1.0",
+  "description": "本地音乐播放器，专注双语歌词（原文一行 / 译文一行）",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "keywords": ["music", "player", "lyrics", "lrc", "bilingual", "electron"],
+  "license": "MIT",
+  "dependencies": {
+    "music-metadata": "^12.3.3"
+  },
+  "devDependencies": {
+    "electron": "31.7.7"
+  }
+}
