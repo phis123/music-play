@@ -158,6 +158,23 @@ ipcMain.handle('dialog:pickFolder', async () => {
 // ---------- 内置网易云 API ----------
 ipcMain.handle('net:songs', async (_e, kw) => netapi.searchSongs(kw))
 ipcMain.handle('net:voices', async (_e, kw) => netapi.searchVoices(kw))
+ipcMain.handle('lyrics:auto', async (_e, { title, artist, filePath }) => {
+  try {
+    const r = await netapi.autoLyric({ title, artist })
+    if (!r.ok) return { ok: false, reason: r.reason }
+    // 写旁挂歌词，下次直接命中
+    if (filePath) {
+      const side = filePath.replace(/\.[^.]+$/, '') + '.lrc'
+      try { fs.writeFileSync(side, r.text, 'utf8') }
+      catch (e) { return { ok: false, reason: 'write:' + (e.code || e.message) + ' @' + side } }
+    }
+    const lines = parseLrc(r.text.replace(/^\uFEFF/, ''))
+    return { ok: lines.length > 0, lines, song: r.song, paired: lines.filter((l) => l.pair).length }
+  } catch (e) {
+    return { ok: false, reason: String(e.message || e) }
+  }
+})
+
 ipcMain.handle('net:preview', async (_e, trackId) => netapi.trackUrl(trackId))
 ipcMain.handle('net:download', async (_e, payload) => netapi.downloadVoice({ ...payload, dir: root }))
 
