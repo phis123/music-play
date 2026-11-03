@@ -288,6 +288,15 @@ function bindGlobal() {
 
   $$('.nav-item').forEach((el) => el.addEventListener('click', () => { location.hash = el.dataset.route }))
   $('#btnNewPlaylist')?.addEventListener('click', () => { location.hash = '#/playlist/1' })
+  $('#btnPickFolder')?.addEventListener('click', async () => {
+    const dir = await window.api.pickFolder()
+    if (!dir) return
+    const lib = await window.api.scan(dir)
+    state.tracks = lib.tracks
+    state.root = lib.root
+    location.hash = '#/local'
+    render()
+  })
 
   $('#pbPlay').addEventListener('click', () => {
     if (state.cur < 0 && state.tracks.length) return play(0)
