@@ -188,7 +188,7 @@ async function pickSong(idx) {
   search.loading = true
   render()
   try {
-    search.voices = await window.api.searchVoices({ name: song.name, artist: song.artist })
+    search.voices = await window.api.searchVoices({ name: song.name, artist: song.artist, duration: song.duration })
   } catch (e) {
     search.err = '声音搜索失败：' + (e.message || e)
   }
