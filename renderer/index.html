@@ -2,51 +2,96 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>music-play</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/app.css">
 </head>
 <body>
-<div id="app">
-  <aside id="side">
-    <div class="side-head">
-      <div class="brand">music-play</div>
-      <button id="btnFolder" title="选择文件夹">📁</button>
+
+<header id="titlebar">
+  <div class="tb-drag"></div>
+  <div class="tb-btns">
+    <button data-win="min" title="最小化">─</button>
+    <button data-win="max" title="最大化">☐</button>
+    <button data-win="close" class="danger" title="关闭">✕</button>
+  </div>
+</header>
+
+<div id="shell">
+  <aside id="sidebar">
+    <div class="side-scroll">
+      <nav class="nav-group">
+        <div class="group-label">发现</div>
+        <a class="nav-item" data-route="#/home"><span class="ico">🏠</span><span>首页</span></a>
+      </nav>
+      <nav class="nav-group">
+        <div class="group-label">我的</div>
+        <a class="nav-item" data-route="#/liked"><span class="ico">♥</span><span>我喜欢的音乐</span></a>
+        <a class="nav-item" data-route="#/recent"><span class="ico">🕘</span><span>最近播放</span></a>
+        <a class="nav-item" data-route="#/local"><span class="ico">💾</span><span>本地音乐</span></a>
+      </nav>
+      <nav class="nav-group">
+        <div class="group-label">歌单 <button id="btnNewPlaylist" title="新建歌单">＋</button></div>
+        <a class="nav-item" data-route="#/playlist/1"><span class="ico">▸</span><span>新建歌单</span></a>
+        <a class="nav-item" data-route="#/playlist/2"><span class="ico">▸</span><span>我的歌单</span></a>
+      </nav>
     </div>
-    <div id="status">准备中…</div>
-    <div id="list"></div>
   </aside>
 
-  <main id="main">
-    <section id="now">
-      <div id="cover" class="cover"></div>
-      <div class="meta">
-        <div id="title">未在播放</div>
-        <div id="artist"></div>
-        <div class="badges">
-          <span id="lyricsSrc" class="badge">—</span>
-          <span id="clock" class="badge">0:00 / 0:00</span>
-        </div>
-      </div>
-    </section>
+  <main id="content"><div id="view"></div></main>
 
-    <section id="lyricsWrap">
-      <div id="lyrics"></div>
-      <div id="empty" class="empty">没有歌词</div>
-    </section>
-
-    <footer id="bar">
-      <input id="seek" type="range" min="0" max="1000" value="0" step="1">
-      <div class="controls">
-        <button id="btnPrev">⏮</button>
-        <button id="btnPlay" class="primary">▶</button>
-        <button id="btnNext">⏭</button>
-        <span id="ver" class="dim"></span>
+  <!-- 歌词独立页 -->
+  <section id="lyricsPage" class="overlay hidden">
+    <div class="lp-head">
+      <button id="lpBack" title="返回（Esc）">←</button>
+      <span class="lp-head-title">歌词</span>
+      <span id="lpSrc" class="chip">—</span>
+    </div>
+    <div class="lp-body">
+      <div class="lp-left">
+        <div class="lp-cover" id="lpCover"></div>
+        <div class="lp-title" id="lpTitle">—</div>
+        <div class="lp-artist" id="lpArtist">—</div>
       </div>
-    </footer>
-    <audio id="audio" preload="metadata"></audio>
-  </main>
+      <div class="lp-right">
+        <div id="lpLyrics"></div>
+        <div id="lpEmpty" class="empty-note hidden">没有歌词</div>
+      </div>
+    </div>
+  </section>
 </div>
-<script src="app.js"></script>
+
+<footer id="playerbar">
+  <div class="pb-left" id="pbInfo" title="点击查看歌词">
+    <div class="pb-cover" id="pbCover"></div>
+    <div class="pb-meta">
+      <div class="pb-title" id="pbTitle">未在播放</div>
+      <div class="pb-artist" id="pbArtist">—</div>
+    </div>
+  </div>
+
+  <div class="pb-center">
+    <div class="pb-controls">
+      <button id="pbPrev" title="上一首">⏮</button>
+      <button id="pbPlay" class="primary" title="播放/暂停">▶</button>
+      <button id="pbNext" title="下一首">⏭</button>
+    </div>
+    <div class="pb-progress">
+      <span id="pbCur">0:00</span>
+      <input id="pbSeek" type="range" min="0" max="1000" value="0">
+      <span id="pbDur">0:00</span>
+    </div>
+  </div>
+
+  <div class="pb-right">
+    <button id="pbLyrics" title="歌词">词</button>
+    <button id="pbVol" title="音量">🔊</button>
+    <span id="pbVer" class="dim"></span>
+  </div>
+
+  <audio id="audio" preload="metadata"></audio>
+</footer>
+
+<script src="js/app.js"></script>
 </body>
 </html>
