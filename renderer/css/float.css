@@ -149,15 +149,23 @@ html, body {
 /* ---------- 锁定态 ---------- */
 #hint {
   position: absolute;
-  bottom: 0;
+  bottom: 2px;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 11px;
-  color: rgba(255, 255, 255, .5);
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: rgba(16, 16, 22, .78);
+  font-size: 11.5px;
+  color: #fff;
   opacity: 0;
   transition: opacity .2s;
   white-space: nowrap;
+  pointer-events: none;
 }
-body.locked #hint { opacity: 1; }
+#hint.show { opacity: 1; }
 body.locked .ctrl,
 body.locked #panel { display: none; }
+
+/* 锁定后必须取消拖动区，否则仍能拖动窗口 */
+body.locked #lines,
+body.locked .drag { -webkit-app-region: no-drag; }
