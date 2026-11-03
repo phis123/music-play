@@ -258,11 +258,62 @@ async function autoLyric({ title, artist }) {
   return { ok: false, reason: '这些结果都没歌词' }
 }
 
+
+/* ---------------- 声音搜索：多查询兜底 ---------------- */
+function firstArtist(a) {
+  return String(a || '').split(/[\/、,&]|feat\.?\s*/i).map((x) => x.trim()).filter(Boolean)[0] || ''
+}
+function looseName(n) {
+  return String(n || '').replace(/[（(【\[].*?[）)】\]]/g, '').replace(/\s+/g, ' ').trim()
+}
+function normKey(s) {
+  return String(s || '').toLowerCase().replace(/[\s\-_「」『』【】\[\]（）()]/g, '')
+}
+
+/**
+ * 依次尝试多种关键词，避免「歌名 + 多个歌手 + 斜杠」把搜索搞空。
+ * 最多 2 次请求：先「歌名 首位歌手」，结果里没有像样的再退回「歌名」。
+ */
+async function searchVoicesSmart(name, artist, limit = 20) {
+  const clean = looseName(name)
+  const fa = firstArtist(artist)
+  const queries = []
+  const q1 = [clean, fa].filter(Boolean).join(' ')
+  if (q1) queries.push(q1)
+  if (clean && clean !== q1) queries.push(clean)
+
+  const seen = new Set()
+  const out = []
+  for (const kw of queries) {
+    let list = []
+    try { list = await searchVoices(kw, limit) } catch { list = [] }
+    for (const v of list) if (!seen.has(v.voiceId)) { seen.add(v.voiceId); out.push(v) }
+    const key = normKey(clean)
+    const hit = out.some((v) => normKey(v.title).includes(key) || key.includes(normKey(v.title).replace(/^声音[:：]?/, '')))
+    if (out.length && hit) break      // 已经有对得上的，别再多发请求
+  }
+  // 排序：标题对得上的优先，其次按播放量；把明显不相干的（来自兜底查询）过滤掉
+  const key = normKey(clean)
+  const score = (v) => {
+    const t = normKey(String(v.title || '').replace(/^声音[:：]?\s*/, ''))
+    if (!t || !key) return 0
+    if (t === key) return 3
+    if (t.includes(key)) return 2
+    if (key.includes(t)) return 1
+    return 0
+  }
+  out.forEach((v) => { v._s = score(v) })
+  const good = out.filter((v) => v._s > 0)
+  const use = good.length ? good : out
+  use.sort((a, b) => (b._s - a._s) || (b.plays - a.plays))
+  return use.map((v) => { delete v._s; return v })
+}
 module.exports = {
   autoLyric,
   ensureServer,
   searchSongs,
   searchVoices,
+  searchVoicesSmart,
   trackUrl,
   lyric,
   downloadVoice,
