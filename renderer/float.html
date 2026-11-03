@@ -7,14 +7,44 @@
 </head>
 <body>
   <div id="wrap">
-    <div class="ctrl">
-      <button id="bLock" title="锁定：鼠标穿透（Ctrl+Alt+L 解锁）">🔓</button>
-      <button id="bClose" title="关闭悬浮窗">✕</button>
+    <div class="bar">
+      <span id="title"></span>
+      <div class="ctrl">
+        <button id="bPrev" title="上一曲">⏮</button>
+        <button id="bNext" title="下一曲">⏭</button>
+        <button id="bStyle" title="颜色 / 字号">🎨</button>
+        <button id="bLock" title="锁定（鼠标穿透）">🔓</button>
+        <button id="bClose" title="关闭悬浮歌词">✕</button>
+      </div>
     </div>
+
     <div id="lines">
       <div id="en"></div>
       <div id="zh">等待播放…</div>
     </div>
+
+    <div id="panel" class="hidden">
+      <div class="row">
+        <span class="lbl">颜色</span>
+        <div class="swatches">
+          <i class="sw on" data-c="#ffffff" style="--c:#ffffff"></i>
+          <i class="sw" data-c="#111114" style="--c:#111114"></i>
+          <i class="sw" data-c="#ec4141" style="--c:#ec4141"></i>
+          <i class="sw" data-c="#4da3ff" style="--c:#4da3ff"></i>
+          <i class="sw" data-c="#ffd54a" style="--c:#ffd54a"></i>
+          <i class="sw" data-c="#4ade80" style="--c:#4ade80"></i>
+          <i class="sw" data-c="#ff8ad4" style="--c:#ff8ad4"></i>
+          <i class="sw" data-c="#c084fc" style="--c:#c084fc"></i>
+        </div>
+      </div>
+      <div class="row">
+        <span class="lbl">字号</span>
+        <button id="szDown">A−</button>
+        <span id="szVal">22</span>
+        <button id="szUp">A＋</button>
+      </div>
+    </div>
+
     <div id="hint">已锁定 · Ctrl+Alt+L 解锁</div>
   </div>
   <script src="js/float.js"></script>
