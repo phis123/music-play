@@ -12,6 +12,7 @@ const state = {
   lines: [],
   activeIdx: -1,
   lastUserScrollAt: 0,
+  floatOn: false,
   searchTab: 'local',
   root: '',
   activeIdx: -1,
@@ -197,7 +198,9 @@ function renderLyrics() {
     }
     box.appendChild(d)
   })
+  state.activeIdx = -2
   syncLyrics(true)
+  pushFloat()
 }
 
 function syncLyrics(force) {
@@ -217,6 +220,7 @@ function syncLyrics(force) {
   if (idx !== state.activeIdx) {
     for (let i = 0; i < kids.length; i++) kids[i].classList.toggle('cur', i === idx)
     state.activeIdx = idx
+    pushFloat()
   }
 
   const following = Date.now() - (state.lastUserScrollAt || 0) > 3000
@@ -281,6 +285,19 @@ function bindLyricsInteraction() {
   }
 }
 
+/* ---------------- 悬浮歌词 ---------------- */
+function currentLine() {
+  const l = state.lines[state.activeIdx]
+  if (!l) {
+    return { en: '', zh: state.lines.length ? '…' : (state.cur >= 0 ? '无歌词' : '等待播放…') }
+  }
+  if (l.pair && l.pair.length > 1) return { en: l.pair[0], zh: l.pair[1] }
+  return { en: '', zh: l.text }
+}
+function pushFloat() {
+  if (state.floatOn) window.api.floatPush(currentLine())
+}
+
 /* ---------------- 歌词页 ---------------- */
 function openLyrics() {
   if (state.cur < 0) return
@@ -333,6 +350,12 @@ function bindGlobal() {
   })
   $('#pbInfo').addEventListener('click', openLyrics)
   $('#pbLyrics').addEventListener('click', openLyrics)
+  $('#pbFloat').addEventListener('click', async () => {
+    const on = await window.api.floatToggle()
+    state.floatOn = on
+    $('#pbFloat').classList.toggle('active', on)
+    if (on) setTimeout(pushFloat, 400)   // 等悬浮窗加载完再推
+  })
   $('#lpBack').addEventListener('click', closeLyrics)
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeLyrics()
