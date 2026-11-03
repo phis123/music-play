@@ -1,29 +1,19 @@
-# ---- Python ----
-__pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
-venv/
-env/
+# ---- Node ----
+node_modules/
+.pnpm-store/
 
-# ---- PyInstaller ----
-build/
+# ---- Electron ----
+out/
 dist/
-*.spec
+*.asar
 
-# ---- WebView2 固定版内核（约 180MB，绝不入库）----
-webview2_runtime/
-wv2*.zip
-Microsoft.WebView2.FixedVersionRuntime*/
-
-# ---- 分发产物 ----
+# ---- 打包产物 ----
 *.zip
+!renderer/**/*.zip
 
 # ---- 本地数据 ----
 *.db
 *.db-journal
-*.db-wal
-.lyrics-cache/
 config.local.json
 
 # ---- 系统垃圾 ----
@@ -35,3 +25,9 @@ desktop.ini
 .vscode/
 .idea/
 *.swp
+
+# ---- 调试留痕 ----
+_*.txt
+_*.log
+_*.json
+_screen*.png
