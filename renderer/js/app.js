@@ -289,7 +289,8 @@ function bindLyricsInteraction() {
 function currentLine() {
   const l = state.lines[state.activeIdx]
   if (!l) {
-    return { en: '', zh: state.lines.length ? '…' : (state.cur >= 0 ? '无歌词' : '等待播放…') }
+    // 还没到第一句歌词：留空（只显示曲名），避免出现「…」
+    return { en: '', zh: state.lines.length ? '' : (state.cur >= 0 ? '无歌词' : '等待播放…') }
   }
   if (l.pair && l.pair.length > 1) return { en: l.pair[0], zh: l.pair[1] }
   return { en: '', zh: l.text }
