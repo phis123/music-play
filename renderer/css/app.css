@@ -443,3 +443,5 @@ body {
   color: var(--dim); font-size: 13px;
 }
 .side-head button:hover { background: var(--hover); }
+
+.pb-right button.active { background: var(--red-soft); color: var(--red); }
