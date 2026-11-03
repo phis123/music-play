@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('api', {
   floatClose: () => ipcRenderer.send('float:close'),
   floatResize: (h) => ipcRenderer.send('float:resize', h),
   floatCmd: (cmd) => ipcRenderer.send('float:cmd', cmd),
+  floatMenu: () => ipcRenderer.send('float:menu'),
+  onFloatKeyinfo: (cb) => ipcRenderer.on('float:keyinfo', (_e, p) => cb(p)),
   onPlayerCmd: (cb) => ipcRenderer.on('player:cmd', (_e, cmd) => cb(cmd)),
   onFloatUpdate: (cb) => ipcRenderer.on('float:update', (_e, p) => cb(p)),
   onFloatLocked: (cb) => ipcRenderer.on('float:locked', (_e, v) => cb(v)),
