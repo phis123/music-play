@@ -175,7 +175,7 @@ let floatWin = null
 
 function createFloatWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize
-  const w = 900, h = 150
+  const w = 900, h = 200
   floatWin = new BrowserWindow({
     width: w,
     height: h,
@@ -215,6 +215,9 @@ ipcMain.on('float:push', (_e, payload) => {
   if (floatWin && !floatWin.isDestroyed()) floatWin.webContents.send('float:update', payload)
 })
 ipcMain.on('float:lock', (_e, locked) => setFloatLock(locked))
+ipcMain.on('float:cmd', (_e, cmd) => {
+  if (win && !win.isDestroyed()) win.webContents.send('player:cmd', cmd)
+})
 ipcMain.on('float:close', () => {
   if (floatWin && !floatWin.isDestroyed()) floatWin.close()
 })
