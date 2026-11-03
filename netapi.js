@@ -274,27 +274,48 @@ function normKey(s) {
  * 依次尝试多种关键词，避免「歌名 + 多个歌手 + 斜杠」把搜索搞空。
  * 最多 2 次请求：先「歌名 首位歌手」，结果里没有像样的再退回「歌名」。
  */
-async function searchVoicesSmart(name, artist, limit = 20) {
+async function searchVoicesSmart(name, artist, duration = 0, limit = 20) {
   const clean = looseName(name)
   const fa = firstArtist(artist)
-  const queries = []
   const q1 = [clean, fa].filter(Boolean).join(' ')
+  const queries = []
   if (q1) queries.push(q1)
   if (clean && clean !== q1) queries.push(clean)
 
   const seen = new Set()
-  const out = []
+  let out = []
   for (const kw of queries) {
     let list = []
     try { list = await searchVoices(kw, limit) } catch { list = [] }
     for (const v of list) if (!seen.has(v.voiceId)) { seen.add(v.voiceId); out.push(v) }
-    const key = normKey(clean)
-    const hit = out.some((v) => normKey(v.title).includes(key) || key.includes(normKey(v.title).replace(/^声音[:：]?/, '')))
-    if (out.length && hit) break      // 已经有对得上的，别再多发请求
+    if (titleHits(out, clean).length) break     // 标题已经对得上，别再发请求
   }
-  // 排序：标题对得上的优先，其次按播放量；把明显不相干的（来自兜底查询）过滤掉
+
+  // ---- 第 3 层兜底：标题都对不上时，按时长接近度排 ----
+  if (!titleHits(out, clean).length && duration > 0 && !out.length) {
+    // 标题没命中且没有结果 → 用「歌名」再搜一次（可能是生僻写法）
+    try { out = await searchVoices(clean, limit) } catch { /* ignore */ }
+  }
+
+  return rankVoices(out, clean, duration)
+}
+
+function titleHits(list, clean) {
   const key = normKey(clean)
-  const score = (v) => {
+  if (!key) return []
+  return list.filter((v) => {
+    const t = normKey(String(v.title || '').replace(/^声音[:：]?\s*/, ''))
+    return t && (t === key || t.includes(key) || key.includes(t))
+  })
+}
+
+/**
+ * 排序：标题命中 > 时长接近 > 播放量
+ * duration 单位秒；给 0 表示不知道时长
+ */
+function rankVoices(list, clean, duration) {
+  const key = normKey(clean)
+  const tScore = (v) => {
     const t = normKey(String(v.title || '').replace(/^声音[:：]?\s*/, ''))
     if (!t || !key) return 0
     if (t === key) return 3
@@ -302,13 +323,32 @@ async function searchVoicesSmart(name, artist, limit = 20) {
     if (key.includes(t)) return 1
     return 0
   }
-  out.forEach((v) => { v._s = score(v) })
-  const good = out.filter((v) => v._s > 0)
-  const use = good.length ? good : out
-  use.sort((a, b) => (b._s - a._s) || (b.plays - a.plays))
-  return use.map((v) => { delete v._s; return v })
+  list.forEach((v) => {
+    v._t = tScore(v)
+    v._d = duration > 0 ? Math.abs((v.duration || 0) - duration) : 9999
+  })
+
+  const good = list.filter((v) => v._t > 0)
+  if (good.length) {
+    good.sort((a, b) => (b._t - a._t) || (b.plays - a.plays))
+    return good.map(strip)
+  }
+
+  // 没有标题命中 → 按时长接近度
+  if (duration > 0) {
+    const tol = Math.max(5, Math.round(duration * 0.06))   // ±5s 或 ±6%
+    let pool = list.filter((v) => v._d <= tol)
+    if (!pool.length) pool = list.filter((v) => v._d <= 60)
+    const use = pool.length ? pool : list
+    use.sort((a, b) => (a._d - b._d) || (b.plays - a.plays))
+    return use.map(strip)
+  }
+
+  list.sort((a, b) => b.plays - a.plays)
+  return list.map(strip)
 }
-module.exports = {
+
+function strip(v) { delete v._t; delete v._d; return v }module.exports = {
   autoLyric,
   ensureServer,
   searchSongs,
