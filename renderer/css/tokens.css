@@ -2,23 +2,34 @@
   /* 品牌 */
   --red: #ec4141;
   --red-hover: #f45c5c;
+  --red-soft: #fdeaea;
 
-  /* 背景层次 */
-  --bg: #121216;
-  --side: #17171c;
-  --panel: #1b1b21;
-  --hover: #22222a;
-  --active: #24242c;
+  /* 背景层次（浅色主基调） */
+  --bg: #ffffff;
+  --side: #f7f7f9;
+  --panel: #ffffff;
+  --hover: #f2f2f5;
+  --active: #fdeaea;
 
   /* 线条 */
-  --line: #2a2a33;
-  --line-soft: #22222a;
+  --line: #e6e6ea;
+  --line-soft: #eeeef1;
 
   /* 文字 */
-  --text: #e8e8ea;
-  --text-2: #b6b6c0;
-  --dim: #8a8a96;
-  --dim-2: #63636e;
+  --text: #1a1a1c;
+  --text-2: #3c3c42;
+  --dim: #8a8a92;
+  --dim-2: #a6a6ae;
+
+  /* 封面占位 */
+  --cover-a: #ececf1;
+  --cover-b: #dcdce4;
+
+  /* 歌词 */
+  --ly-en: #6b7280;
+  --ly-zh: #1f2328;
+  --ly-en-cur: #111114;
+  --ly-zh-cur: #111114;
 
   /* 尺寸 */
   --titlebar-h: 38px;
@@ -29,5 +40,5 @@
   --r-md: 8px;
   --r-lg: 12px;
 
-  color-scheme: dark;
+  color-scheme: light;
 }
