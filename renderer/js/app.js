@@ -126,6 +126,7 @@ function voiceListHtml() {
     const playing = search.playingVoiceId === v.voiceId
     return `
       <div class="voice-row">
+        <div class="v-cov"${v.cover ? ` style="background-image:url(&quot;${esc(v.cover)}&quot;)"` : ''}></div>
         <div class="v-main">
           <div class="v-title">${esc(v.title || '(无标题)')}</div>
           <div class="v-sub">${esc(v.radio || '未知电台')} · ${fmtDur(v.duration)} · ${fmtPlays(v.plays)}播放</div>
