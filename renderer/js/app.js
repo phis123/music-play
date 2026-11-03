@@ -13,6 +13,7 @@ const state = {
   activeIdx: -1,
   lastUserScrollAt: 0,
   floatOn: false,
+  offsetMs: 0,
   searchTab: 'local',
   root: '',
   activeIdx: -1,
@@ -347,6 +348,19 @@ async function play(i) {
     }
   }
   state.lines = lyr.lines || []
+  // 歌词偏移：有记录用记录；没有就测一次开头静音（等效裁掉多余前奏）
+  const savedOff = getOffset(t.path)
+  state.offsetMs = savedOff == null ? 0 : savedOff
+  if (savedOff == null && state.lines.length) {
+    measureLeadSilence(t.path).then((lead) => {
+      if (lead == null) return
+      if (lead < 150) { setOffset(t.path, 0); return }
+      state.offsetMs = Math.round(lead)
+      setOffset(t.path, state.offsetMs)
+      updateOffsetChip()
+      syncLyrics(true)
+    }).catch(() => {})
+  }
   state.lastUserScrollAt = 0
   state.activeIdx = -2
   $('#lpResume')?.classList.add('hidden')
@@ -390,7 +404,7 @@ function syncLyrics(force) {
   const ms = audio.currentTime * 1000
   let idx = -1
   for (let i = 0; i < state.lines.length; i++) {
-    if (state.lines[i].t <= ms + 60) idx = i
+    if (lineTime(state.lines[i]) <= ms + 60) idx = i
     else break
   }
 
@@ -416,6 +430,49 @@ function syncLyrics(force) {
   if (force) { $('#lpResume')?.classList.add('hidden'); state.lastUserScrollAt = 0 }
 }
 
+/* ---------------- 开头静音测量 + 歌词偏移 ---------------- */
+const OFFSET_KEY = (path) => 'lyrOff:' + path
+
+function getOffset(path) {
+  const v = parseFloat(localStorage.getItem(OFFSET_KEY(path)) || '')
+  return Number.isFinite(v) ? v : null
+}
+function setOffset(path, ms) {
+  localStorage.setItem(OFFSET_KEY(path), String(Math.round(ms)))
+}
+
+/**
+ * 用 Web Audio 解码音频，测开头静音多长（毫秒）。
+ * 取左右声道平均能量，前 30 秒内第一次超过阈值的位置。
+ */
+async function measureLeadSilence(path) {
+  try {
+    const res = await fetch(toFileUrl(path))
+    const buf = await res.arrayBuffer()
+    const AC = window.AudioContext || window.webkitAudioContext
+    const ctx = new AC()
+    const audio = await ctx.decodeAudioData(buf)
+    const sr = audio.sampleRate
+    const ch0 = audio.getChannelData(0)
+    const ch1 = audio.numberOfChannels > 1 ? audio.getChannelData(1) : null
+    const limit = Math.min(ch0.length, Math.floor(sr * 30))
+    const TH = 0.012          // 幅度阈值（约 -38dB）
+    let i = 0
+    for (; i < limit; i++) {
+      const v = Math.abs(ch0[i]) + (ch1 ? Math.abs(ch1[i]) : 0)
+      if (v > TH) break
+    }
+    ctx.close()
+    return Math.round((i / sr) * 1000)
+  } catch (e) {
+    return null
+  }
+}
+
+/* ---------------- 视口偏移应用 ---------------- */
+function lineTime(l) {
+  return l.t + (state.offsetMs || 0)
+}
 /* ---------------- 歌词区交互 ---------------- */
 function applyLyricPadding() {
   const pane = document.querySelector('.lp-right')
@@ -484,6 +541,23 @@ function pushFloat() {
 }
 
 /* ---------------- 歌词页 ---------------- */
+function updateOffsetChip() {
+  const el = $('#lpOff')
+  if (!el) return
+  const ms = Math.round(state.offsetMs || 0)
+  el.textContent = '偏移 ' + (ms > 0 ? '+' : '') + (ms / 1000).toFixed(1) + 's'
+  el.style.color = ms ? 'var(--red)' : ''
+  el.style.borderColor = ms ? 'var(--red)' : ''
+}
+
+function nudgeOffset(deltaMs) {
+  const t = state.tracks[state.cur]
+  if (!t) return
+  state.offsetMs = Math.round((state.offsetMs || 0) + deltaMs)
+  setOffset(t.path, state.offsetMs)
+  updateOffsetChip()
+  syncLyrics(true)
+}
 function openLyrics() {
   if (state.cur < 0) return
   $('#lyricsPage').classList.remove('hidden')
