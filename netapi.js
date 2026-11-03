@@ -115,13 +115,38 @@ function normVoice(r) {
   }
 }
 
+/* ---------------- 补封面（搜索接口不返回 picUrl） ---------------- */
+function thumb(url, size = 140) {
+  if (!url) return ''
+  return url.includes('?') ? url : `${url}?param=${size}y${size}`
+}
+
+async function fillCovers(songs) {
+  const need = songs.filter((s) => !s.cover && s.id).map((s) => s.id)
+  if (!need.length) return songs
+  try {
+    const d = await get(`/song/detail?${qs({ ids: need.slice(0, 100).join(',') })}`)
+    const bag = d.data || d
+    const list = bag.songs || []
+    const map = new Map()
+    for (const raw of list) {
+      const al = raw.al || raw.album || {}
+      map.set(raw.id, al.picUrl || al.blurPicUrl || '')
+    }
+    for (const s of songs) {
+      if (!s.cover) s.cover = thumb(map.get(s.id) || '')
+    }
+  } catch { /* 补封面失败不影响搜索 */ }
+  return songs
+}
+
 /* ---------------- 搜索 ---------------- */
 async function searchSongs(keywords, limit = 30) {
   await ensureServer()
   const d = await get(`/search?${qs({ keywords, type: 1, limit })}`)
   const bag = d.data || d
   const songs = (bag.result && bag.result.songs) || bag.songs || []
-  return songs.map(normSong)
+  return fillCovers(songs.map(normSong))
 }
 
 async function searchVoices(keywords, limit = 30) {
