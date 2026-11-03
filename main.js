@@ -18,6 +18,18 @@ async function mmModule() {
   return _mm
 }
 
+
+// 无标签时从文件名猜 标题/歌手：\"001-月光-胡彦斌\" → 月光 / 胡彦斌
+function parseName(base) {
+  let s = base.replace(/^\d{1,3}\s*[-_.、)\]]\s*/, '')          // 去掉序号
+  s = s.replace(/\s*[\[【（(][^\]】）)]*[\]】）)]\s*$/, '').trim() // 去掉结尾方括号标签
+  const m = s.match(/^(.*?)\s+-\s+(.+)$/)                        // 优先「 - 」分隔
+  if (m && !/\s/.test(m[2]) && m[2].length <= 20) return { title: m[1].trim(), artist: m[2].trim() }
+  const one = s.match(/^([^-]{1,60})-([^-]{1,20})$/)              // 无空格单横线
+  if (one && one[2].trim().length <= 12) return { title: one[1].trim(), artist: one[2].trim() }
+  return { title: s || base, artist: '' }
+}
+
 async function walk(dir, out, depth = 0) {
   if (depth > 8) return
   let ents
@@ -72,6 +84,11 @@ ipcMain.handle('library:scan', async (_e, dir) => {
         duration = meta.format.duration || 0
       } catch { /* 退回文件名 */ }
     }
+    // 没有标签时用文件名兜底
+    if (!artist || title === path.basename(f, path.extname(f))) {
+      const g = parseName(path.basename(f, path.extname(f)))
+      if (g.artist) { title = g.title; artist = g.artist }
+    }
     const lrcPath = path.join(path.dirname(f), path.basename(f, path.extname(f)) + '.lrc')
     tracks.push({ path: f, title, artist, album, duration, hasLrc: fs.existsSync(lrcPath) })
   }
@@ -80,18 +97,56 @@ ipcMain.handle('library:scan', async (_e, dir) => {
 })
 
 ipcMain.handle('lyrics:get', async (_e, filePath) => {
-  const lrcPath = path.join(path.dirname(filePath), path.basename(filePath, path.extname(filePath)) + '.lrc')
-  if (fs.existsSync(lrcPath)) {
-    const text = await fsp.readFile(lrcPath, 'utf8')
-    return { source: 'lrc', lines: parseLrc(text.replace(/^\uFEFF/, '')) }
+  const dir = path.dirname(filePath)
+  const base = path.basename(filePath, path.extname(filePath))
+  // 多个歌词候选：同名 .lrc 优先，其次常见的双语/翻译后缀
+  const names = [
+    `${base}.lrc`, `${base}.双语.lrc`, `${base}.双行.lrc`, `${base}.trans.lrc`,
+    `${base}.zh.lrc`, `${base}.ja.lrc`, `${base}.bilingual.lrc`,
+  ]
+  const found = []
+  for (const n of names) {
+    const fp = path.join(dir, n)
+    if (!fs.existsSync(fp)) continue
+    try {
+      const text = (await fsp.readFile(fp, 'utf8')).replace(/^\uFEFF/, '')
+      const lines = parseLrc(text)
+      if (lines.length) found.push({ file: n, lines, paired: lines.filter((l) => l.pair).length })
+    } catch { /* 跳过损坏文件 */ }
   }
+  // 有「原文/译文配对」的优先；否则用第一个能解析的
+  const best = found.find((f) => f.paired > 0) || found[0]
+  if (best) return { source: 'lrc', file: best.file, lines: best.lines, paired: best.paired }
+
   try {
     const mm = await mmModule()
     const meta = await mm.parseFile(filePath, { skipCovers: true })
     const embedded = (meta.common.lyrics || []).find(Boolean)
-    if (embedded) return { source: 'embedded', lines: parseLrc(embedded) }
+    if (embedded) {
+      const lines = parseLrc(embedded)
+      if (lines.length) return { source: 'embedded', lines, paired: lines.filter((l) => l.pair).length }
+    }
   } catch { /* ignore */ }
-  return { source: 'none', lines: [] }
+  return { source: 'none', lines: [], paired: 0 }
+})
+
+
+// ---------- 封面（带缓存，按需取） ----------
+const coverCache = new Map()
+ipcMain.handle('cover:get', async (_e, filePath) => {
+  if (coverCache.has(filePath)) return coverCache.get(filePath)
+  let url = ''
+  try {
+    const mm = await mmModule()
+    const meta = await mm.parseFile(filePath, { duration: false, skipCovers: false })
+    const pic = (meta.common.picture || [])[0]
+    if (pic && pic.data) {
+      const b64 = Buffer.from(pic.data).toString('base64')
+      url = `data:${pic.format || 'image/jpeg'};base64,${b64}`
+    }
+  } catch { /* 忽略 */ }
+  coverCache.set(filePath, url)
+  return url
 })
 
 ipcMain.handle('dialog:pickFolder', async () => {
@@ -119,7 +174,7 @@ function createWindow() {
     width: 1200, height: 780,
     minWidth: 960, minHeight: 620,
     frame: false,
-    backgroundColor: '#121216',
+    backgroundColor: '#ffffff',
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
