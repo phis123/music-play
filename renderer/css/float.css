@@ -20,7 +20,28 @@ html, body {
   flex-direction: column;
   justify-content: flex-end;
   padding: 4px 14px 6px;
+  -webkit-app-region: no-drag;   /* 整块可拖会吞掉鼠标事件，改为局部拖动 */
+}
+
+/* ---------- 拖动条（左上角） ---------- */
+.drag {
+  position: absolute;
+  top: 2px;
+  left: 8px;
+  width: 46px;
+  height: 20px;
+  border-radius: 6px;
+  background: rgba(28, 28, 34, .55);
   -webkit-app-region: drag;
+}
+.drag::after {
+  content: "⠿ 拖动";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  color: rgba(255, 255, 255, .75);
 }
 
 /* ---------- 顶部：曲名 / 作者 ---------- */
@@ -46,6 +67,7 @@ html, body {
 
 /* ---------- 歌词（无底色） ---------- */
 #lines {
+  -webkit-app-region: drag;      /* 按住歌词可拖动窗口 */
   text-align: center;
   transform: translateZ(0);   /* 独立合成层，减少重绘抖动 */
   backface-visibility: hidden;
@@ -59,6 +81,8 @@ html, body {
   text-shadow: 0 1px 6px rgba(0, 0, 0, .9), 0 0 2px rgba(0, 0, 0, .8);
 }
 #en:empty { display: none; }
+
+#zh:empty { display: none; }
 
 #zh {
   font-size: var(--ly-size);
@@ -75,11 +99,11 @@ html, body {
   right: 10px;
   display: flex;
   gap: 3px;
-  opacity: 0;
+  opacity: .82;                 /* 常驻显示，鼠标移近变亮 */
   transition: opacity .18s;
   -webkit-app-region: no-drag;
 }
-#wrap:hover .ctrl { opacity: 1; }
+.ctrl:hover { opacity: 1; }
 
 .ctrl button, #panel button {
   border: none;
@@ -89,7 +113,7 @@ html, body {
   cursor: pointer;
   font-size: 12px;
 }
-.ctrl button { width: 24px; height: 24px; }
+.ctrl button { width: 26px; height: 22px; }
 .ctrl button:hover, #panel button:hover { background: rgba(236, 65, 65, .9); }
 
 /* ---------- 设置面板 ---------- */
