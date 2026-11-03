@@ -1,5 +1,5 @@
 // music-play · 主进程
-const { app, BrowserWindow, ipcMain, dialog, screen, globalShortcut } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, screen, globalShortcut, Tray, Menu, nativeImage } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const fsp = fs.promises
@@ -170,6 +170,68 @@ ipcMain.on('win:toggle-max', () => {
 ipcMain.on('win:close', () => win && win.close())
 
 
+
+// ---------- 托盘（锁定后的保底解锁入口） ----------
+const TRAY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAyUlEQVR4nO2X0Q2DMAxEnVM3aBeCwWGhMgNVPyIBjZ04tRMkuL8o+N6ZSMEQdVbQFryHYZX2X/Os8gxW4NogwRqsDQJPeIkHPOElXvCG5zzRAi55oxWcY0Br8Jymqj1O4JJJgBRI2jtqywJ1FrTdp9bSHqfIBHUW7gB0H8HVj+ARhwbr7wB3FyzjuBtUUGoYC7l1rVA7TP6jLQuawti1Vfdf/XTtPRMc3zRyD3jCkwG8QnCe0BZYwsUAViFyHuH0v2akDNLyPjHRB4+YZ9o9UTaiAAAAAElFTkSuQmCC'
+let tray = null
+
+function buildTrayMenu() {
+  return Menu.buildFromTemplate([
+    {
+      label: floatWin ? '关闭悬浮歌词' : '打开悬浮歌词',
+      click: () => {
+        if (floatWin) { floatWin.close(); floatWin = null }
+        else { createFloatWindow(); setTimeout(() => { if (win) win.webContents.send('float:opened') }, 300) }
+      },
+    },
+    {
+      label: floatLocked ? '解锁悬浮歌词（鼠标可点）' : '锁定悬浮歌词（鼠标穿透）',
+      enabled: !!floatWin,
+      click: () => setFloatLock(!floatLocked),
+    },
+    { type: 'separator' },
+    { label: '显示主窗口', click: () => { if (win) { win.show(); win.focus() } } },
+    { type: 'separator' },
+    { label: '退出 music-play', click: () => app.quit() },
+  ])
+}
+
+function createTray() {
+  try {
+    const icon = nativeImage.createFromDataURL(TRAY_PNG)
+    tray = new Tray(icon)
+    tray.setToolTip('music-play 悬浮歌词')
+    tray.on('right-click', () => tray.popUpContextMenu(buildTrayMenu()))
+    tray.on('double-click', () => {
+      if (!floatWin) { createFloatWindow(); return }
+      setFloatLock(!floatLocked)          // 双击托盘：快速切锁定
+    })
+  } catch (e) {
+    // 托盘不可用不影响主功能
+  }
+}
+
+// ---------- 解锁快捷键（多候选，注册成功才算数） ----------
+let unlockKey = ''
+const KEY_CANDIDATES = [
+  ['Control+Alt+L', 'Ctrl+Alt+L'],
+  ['Control+Alt+U', 'Ctrl+Alt+U'],
+  ['Control+Shift+L', 'Ctrl+Shift+L'],
+  ['Alt+Shift+L', 'Alt+Shift+L'],
+]
+
+function registerUnlockShortcut() {
+  for (const [acc, label] of KEY_CANDIDATES) {
+    try {
+      if (globalShortcut.register(acc, () => setFloatLock(!floatLocked))) {
+        unlockKey = label
+        return
+      }
+    } catch { /* 下一个 */ }
+  }
+  unlockKey = '托盘图标右键'
+}
+
 // ---------- 悬浮歌词窗 ----------
 let floatWin = null
 
@@ -201,6 +263,11 @@ function createFloatWindow() {
   floatWin.setAlwaysOnTop(true, 'screen-saver')
   floatWin.setVisibleOnAllWorkspaces(true)
   floatWin.loadFile(path.join(__dirname, 'renderer', 'float.html'))
+  floatWin.webContents.on('did-finish-load', () => {
+    if (floatWin && !floatWin.isDestroyed()) {
+      floatWin.webContents.send('float:keyinfo', { key: unlockKey, locked: floatLocked })
+    }
+  })
   floatWin.on('closed', () => { floatWin = null; floatLocked = false })
   return floatWin
 }
@@ -215,6 +282,9 @@ ipcMain.on('float:push', (_e, payload) => {
   if (floatWin && !floatWin.isDestroyed()) floatWin.webContents.send('float:update', payload)
 })
 ipcMain.on('float:lock', (_e, locked) => setFloatLock(locked))
+ipcMain.on('float:menu', () => {
+  buildTrayMenu().popup({ window: win || undefined })
+})
 ipcMain.on('float:cmd', (_e, cmd) => {
   if (win && !win.isDestroyed()) win.webContents.send('player:cmd', cmd)
 })
@@ -262,11 +332,8 @@ function setFloatLock(locked) {
 
 app.whenReady().then(() => {
   createWindow()
-  // Ctrl+Alt+L：悬浮歌词 锁定/解锁（锁定后鼠标穿透，只能靠这个解锁）
-  globalShortcut.register('Control+Alt+L', () => {
-    if (!floatWin) return
-    setFloatLock(!floatLocked)
-  })
+  createTray()
+  registerUnlockShortcut()
 })
 app.on('will-quit', () => globalShortcut.unregisterAll())
 app.on('window-all-closed', () => app.quit())
