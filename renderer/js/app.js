@@ -11,9 +11,10 @@ const state = {
   cur: -1,
   lines: [],
   activeIdx: -1,
+  lastUserScrollAt: 0,
   searchTab: 'local',
   root: '',
-  userScrolling: false,
+  activeIdx: -1,
 }
 
 /* ---------------- 工具 ---------------- */
@@ -171,7 +172,8 @@ async function play(i) {
 
   const lyr = await window.api.lyrics(t.path)
   state.lines = lyr.lines || []
-  state.userScrolling = false
+  state.lastUserScrollAt = 0
+  state.activeIdx = -2
   $('#lpResume')?.classList.add('hidden')
   $('#lpSrc').textContent = lyr.source === 'lrc' ? '旁挂 LRC' : lyr.source === 'embedded' ? '内嵌歌词' : '无歌词'
   renderLyrics()
@@ -200,49 +202,63 @@ function renderLyrics() {
 
 function syncLyrics(force) {
   if (!state.lines.length) return
+  const pane = document.querySelector('.lp-right')
+  const box = $('#lpLyrics')
+  if (!pane || !box) return
+
   const ms = audio.currentTime * 1000
   let idx = -1
   for (let i = 0; i < state.lines.length; i++) {
     if (state.lines[i].t <= ms + 60) idx = i
     else break
   }
-  if (idx === state.activeIdx && !force) return
-  state.activeIdx = idx
-  const box = $('#lpLyrics')
-  const kids = box.children
-  for (let i = 0; i < kids.length; i++) kids[i].classList.toggle('cur', i === idx)
-  const el = kids[idx]
-  if (!el) return
-  if (state.userScrolling && !force) return   // 用户正在翻歌词，不抢滚动
-  const top = el.offsetTop - box.clientHeight * 0.38 + el.offsetHeight / 2
-  box.parentElement.scrollTo({ top: Math.max(0, top), behavior: force ? 'auto' : 'smooth' })
-}
 
+  const kids = box.children
+  if (idx !== state.activeIdx) {
+    for (let i = 0; i < kids.length; i++) kids[i].classList.toggle('cur', i === idx)
+    state.activeIdx = idx
+  }
+
+  const following = Date.now() - (state.lastUserScrollAt || 0) > 3000
+  if (!force && !following) return          // 用户刚滑动过，先不抢
+
+  // 首句（或还没到第一句）→ 顶部对齐；其余居中
+  if (idx <= 0) {
+    pane.scrollTo({ top: 0, behavior: force ? 'auto' : 'smooth' })
+  } else {
+    const el = kids[idx]
+    if (!el) return
+    const top = el.offsetTop - pane.clientHeight / 2 + el.offsetHeight / 2
+    pane.scrollTo({ top: Math.max(0, top), behavior: force ? 'auto' : 'smooth' })
+  }
+  if (force) { $('#lpResume')?.classList.add('hidden'); state.lastUserScrollAt = 0 }
+}
 
 /* ---------------- 歌词区交互 ---------------- */
-let scrollTimer = null
+function applyLyricPadding() {
+  const pane = document.querySelector('.lp-right')
+  const box = $('#lpLyrics')
+  if (!pane || !box) return
+  const pad = Math.max(80, Math.round(pane.clientHeight / 2 - 30))
+  box.style.paddingTop = pad + 'px'
+  box.style.paddingBottom = pad + 'px'
+}
 function markUserScroll() {
-  state.userScrolling = true
+  state.lastUserScrollAt = Date.now()
   $('#lpResume')?.classList.remove('hidden')
-  clearTimeout(scrollTimer)
-  scrollTimer = setTimeout(() => {
-    state.userScrolling = false
-    $('#lpResume')?.classList.add('hidden')
-    syncLyrics(true)
-  }, 3500)
 }
 function resumeFollow() {
-  state.userScrolling = false
-  clearTimeout(scrollTimer)
+  state.lastUserScrollAt = 0
   $('#lpResume')?.classList.add('hidden')
   syncLyrics(true)
 }
 function bindLyricsInteraction() {
   const pane = document.querySelector('.lp-right')
-  if (pane && !pane.dataset.bound) {
+  if (!pane) return
+  if (!pane.dataset.bound) {
     pane.dataset.bound = '1'
     pane.addEventListener('wheel', markUserScroll, { passive: true })
-    pane.addEventListener('pointerdown', markUserScroll)
+    pane.addEventListener('touchmove', markUserScroll, { passive: true })
     pane.addEventListener('click', (e) => {
       const el = e.target.closest('.ly-line')
       if (!el) return
@@ -250,14 +266,19 @@ function bindLyricsInteraction() {
       const i = Array.prototype.indexOf.call(box.children, el)
       const line = state.lines[i]
       if (!line) return
-      audio.currentTime = line.t / 1000      // 左键点击歌词 → 跳到该时间点
+      audio.currentTime = line.t / 1000
       if (audio.paused) audio.play().catch(() => {})
-      state.userScrolling = false
+      state.lastUserScrollAt = 0
       $('#lpResume')?.classList.add('hidden')
       syncLyrics(true)
     })
+    window.addEventListener('resize', () => { applyLyricPadding(); syncLyrics(true) })
   }
-  $('#lpResume')?.addEventListener('click', resumeFollow)
+  const btn = $('#lpResume')
+  if (btn && !btn.dataset.bound) {
+    btn.dataset.bound = '1'
+    btn.addEventListener('click', resumeFollow)
+  }
 }
 
 /* ---------------- 歌词页 ---------------- */
@@ -265,7 +286,9 @@ function openLyrics() {
   if (state.cur < 0) return
   $('#lyricsPage').classList.remove('hidden')
   bindLyricsInteraction()
-  state.userScrolling = false
+  applyLyricPadding()
+  state.lastUserScrollAt = 0
+  state.activeIdx = -2
   $('#lpResume')?.classList.add('hidden')
   syncLyrics(true)
 }
