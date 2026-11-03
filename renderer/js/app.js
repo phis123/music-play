@@ -13,6 +13,7 @@ const state = {
   activeIdx: -1,
   searchTab: 'local',
   root: '',
+  userScrolling: false,
 }
 
 /* ---------------- 工具 ---------------- */
@@ -170,6 +171,8 @@ async function play(i) {
 
   const lyr = await window.api.lyrics(t.path)
   state.lines = lyr.lines || []
+  state.userScrolling = false
+  $('#lpResume')?.classList.add('hidden')
   $('#lpSrc').textContent = lyr.source === 'lrc' ? '旁挂 LRC' : lyr.source === 'embedded' ? '内嵌歌词' : '无歌词'
   renderLyrics()
 }
@@ -209,16 +212,61 @@ function syncLyrics(force) {
   const kids = box.children
   for (let i = 0; i < kids.length; i++) kids[i].classList.toggle('cur', i === idx)
   const el = kids[idx]
-  if (el) {
-    const top = el.offsetTop - box.clientHeight * 0.38 + el.offsetHeight / 2
-    box.parentElement.scrollTo({ top: Math.max(0, top), behavior: force ? 'auto' : 'smooth' })
+  if (!el) return
+  if (state.userScrolling && !force) return   // 用户正在翻歌词，不抢滚动
+  const top = el.offsetTop - box.clientHeight * 0.38 + el.offsetHeight / 2
+  box.parentElement.scrollTo({ top: Math.max(0, top), behavior: force ? 'auto' : 'smooth' })
+}
+
+
+/* ---------------- 歌词区交互 ---------------- */
+let scrollTimer = null
+function markUserScroll() {
+  state.userScrolling = true
+  $('#lpResume')?.classList.remove('hidden')
+  clearTimeout(scrollTimer)
+  scrollTimer = setTimeout(() => {
+    state.userScrolling = false
+    $('#lpResume')?.classList.add('hidden')
+    syncLyrics(true)
+  }, 3500)
+}
+function resumeFollow() {
+  state.userScrolling = false
+  clearTimeout(scrollTimer)
+  $('#lpResume')?.classList.add('hidden')
+  syncLyrics(true)
+}
+function bindLyricsInteraction() {
+  const pane = document.querySelector('.lp-right')
+  if (pane && !pane.dataset.bound) {
+    pane.dataset.bound = '1'
+    pane.addEventListener('wheel', markUserScroll, { passive: true })
+    pane.addEventListener('pointerdown', markUserScroll)
+    pane.addEventListener('click', (e) => {
+      const el = e.target.closest('.ly-line')
+      if (!el) return
+      const box = $('#lpLyrics')
+      const i = Array.prototype.indexOf.call(box.children, el)
+      const line = state.lines[i]
+      if (!line) return
+      audio.currentTime = line.t / 1000      // 左键点击歌词 → 跳到该时间点
+      if (audio.paused) audio.play().catch(() => {})
+      state.userScrolling = false
+      $('#lpResume')?.classList.add('hidden')
+      syncLyrics(true)
+    })
   }
+  $('#lpResume')?.addEventListener('click', resumeFollow)
 }
 
 /* ---------------- 歌词页 ---------------- */
 function openLyrics() {
   if (state.cur < 0) return
   $('#lyricsPage').classList.remove('hidden')
+  bindLyricsInteraction()
+  state.userScrolling = false
+  $('#lpResume')?.classList.add('hidden')
   syncLyrics(true)
 }
 function closeLyrics() {
