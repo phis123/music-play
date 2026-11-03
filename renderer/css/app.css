@@ -430,3 +430,16 @@ body {
   transition: transform .15s, background .15s;
 }
 #lpResume:hover { background: var(--red-hover); transform: translateY(-1px); }
+
+/* ---------------- 侧栏顶部 ---------------- */
+#sidebar { display: grid; grid-template-rows: auto 1fr; }
+.side-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px 6px;
+}
+.brand { font-weight: 700; font-size: 13.5px; color: var(--red); letter-spacing: .3px; }
+.side-head button {
+  width: 26px; height: 26px; border-radius: var(--r-sm);
+  color: var(--dim); font-size: 13px;
+}
+.side-head button:hover { background: var(--hover); }
