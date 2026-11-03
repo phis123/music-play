@@ -23,6 +23,18 @@ function applyStyle(save) {
 function resize() {}
 
 let lastKey = ''
+let unlockLabel = 'Ctrl+Alt+L'
+let toastTimer = null
+
+// 锁定提示：出现 4 秒后自动消失
+function toast(msg, ms = 4000) {
+  const h = $('#hint')
+  if (!h) return
+  h.textContent = msg
+  h.classList.add('show')
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => h.classList.remove('show'), ms)
+}
 
 /* ---------- 数据 ---------- */
 function apply(payload) {
@@ -38,13 +50,25 @@ function apply(payload) {
 
 /* ---------- 事件 ---------- */
 window.api?.onFloatUpdate?.(apply)
-window.api?.onFloatLocked?.((locked) => document.body.classList.toggle('locked', !!locked))
+window.api?.onFloatLocked?.((locked) => {
+  document.body.classList.toggle('locked', !!locked)
+  if (locked) toast(`已锁定 · ${unlockLabel} 解锁`, 4000)
+  else toast('已解锁，可拖动 / 点击', 1600)
+})
+window.api?.onFloatKeyinfo?.((p) => {
+  if (p && p.key) unlockLabel = p.key
+  if (p && typeof p.locked === 'boolean' && p.locked) {
+    document.body.classList.add('locked')
+    toast(`已锁定 · ${unlockLabel} 解锁`, 4000)
+  }
+})
 
 $('#bPrev')?.addEventListener('click', () => window.api.floatCmd('prev'))
 $('#bNext')?.addEventListener('click', () => window.api.floatCmd('next'))
 $('#bClose')?.addEventListener('click', () => window.api.floatClose())
 $('#bLock')?.addEventListener('click', () => {
   document.body.classList.add('locked')
+  toast(`已锁定 · ${unlockLabel} 解锁`, 4000)
   window.api.floatLock(true)
 })
 
