@@ -334,12 +334,27 @@ async function play(i) {
 
   $$('.track-row').forEach((el) => el.classList.toggle('active', +el.dataset.i === i))
 
-  const lyr = await window.api.lyrics(t.path)
+  let lyr = await window.api.lyrics(t.path)
+  if (!lyr.lines || !lyr.lines.length) {
+    // 没有旁挂/内嵌歌词 → 自动去网易云找一份，并存成 .lrc
+    $('#lpSrc').textContent = '正在搜索歌词…'
+    const auto = await window.api.autoLyric({
+      title: cleanTitle(t.title), artist: t.artist, filePath: t.path,
+    })
+    if (auto && auto.ok) {
+      lyr = { source: 'netease', lines: auto.lines }
+      t.hasLrc = true
+    }
+  }
   state.lines = lyr.lines || []
   state.lastUserScrollAt = 0
   state.activeIdx = -2
   $('#lpResume')?.classList.add('hidden')
-  $('#lpSrc').textContent = lyr.source === 'lrc' ? '旁挂 LRC' : lyr.source === 'embedded' ? '内嵌歌词' : '无歌词'
+  $('#lpSrc').textContent =
+    lyr.source === 'lrc' ? '旁挂 LRC'
+    : lyr.source === 'embedded' ? '内嵌歌词'
+    : lyr.source === 'netease' ? '网易云（已存盘）'
+    : '无歌词'
   renderLyrics()
 }
 
