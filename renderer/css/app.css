@@ -404,3 +404,29 @@ body {
 /* ---------------- 封面 ---------------- */
 .cov, .pb-cover, .lp-cover { background-size: cover; background-position: center; overflow: hidden; }
 .cov.has-cover, .pb-cover.has-cover, .lp-cover.has-cover { background-color: transparent; }
+
+/* ---------------- 歌词交互 ---------------- */
+.ly-line {
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  padding-left: 10px;
+  margin-left: -10px;
+  transition: opacity .22s, background-color .12s, color .12s;
+}
+.ly-line:hover { background: var(--hover); opacity: .95; }
+.ly-line:hover .en, .ly-line:hover .one { color: var(--text); }
+.ly-line:active { background: var(--red-soft); }
+
+#lpResume {
+  position: absolute;
+  right: 26px;
+  bottom: 22px;
+  padding: 7px 16px;
+  border-radius: 999px;
+  background: var(--red);
+  color: #fff;
+  font-size: 12.5px;
+  box-shadow: 0 6px 18px rgba(236, 65, 65, .32);
+  transition: transform .15s, background .15s;
+}
+#lpResume:hover { background: var(--red-hover); transform: translateY(-1px); }
