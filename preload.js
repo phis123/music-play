@@ -9,4 +9,12 @@ contextBridge.exposeInMainWorld('api', {
   winMin: () => ipcRenderer.send('win:minimize'),
   winMax: () => ipcRenderer.send('win:toggle-max'),
   winClose: () => ipcRenderer.send('win:close'),
+  floatToggle: () => ipcRenderer.invoke('float:toggle'),
+  floatIsOpen: () => ipcRenderer.invoke('float:isOpen'),
+  floatPush: (payload) => ipcRenderer.send('float:push', payload),
+  floatLock: (locked) => ipcRenderer.send('float:lock', locked),
+  floatClose: () => ipcRenderer.send('float:close'),
+  floatResize: (h) => ipcRenderer.send('float:resize', h),
+  onFloatUpdate: (cb) => ipcRenderer.on('float:update', (_e, p) => cb(p)),
+  onFloatLocked: (cb) => ipcRenderer.on('float:locked', (_e, v) => cb(v)),
 })
