@@ -1,0 +1,33 @@
+:root {
+  /* 品牌 */
+  --red: #ec4141;
+  --red-hover: #f45c5c;
+
+  /* 背景层次 */
+  --bg: #121216;
+  --side: #17171c;
+  --panel: #1b1b21;
+  --hover: #22222a;
+  --active: #24242c;
+
+  /* 线条 */
+  --line: #2a2a33;
+  --line-soft: #22222a;
+
+  /* 文字 */
+  --text: #e8e8ea;
+  --text-2: #b6b6c0;
+  --dim: #8a8a96;
+  --dim-2: #63636e;
+
+  /* 尺寸 */
+  --titlebar-h: 38px;
+  --sidebar-w: 240px;
+  --player-h: 72px;
+
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+
+  color-scheme: dark;
+}
