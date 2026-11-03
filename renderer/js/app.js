@@ -188,8 +188,7 @@ async function pickSong(idx) {
   search.loading = true
   render()
   try {
-    const kw = [song.name, song.artist].filter(Boolean).join(' ')
-    search.voices = await window.api.searchVoices(kw)
+    search.voices = await window.api.searchVoices({ name: song.name, artist: song.artist })
   } catch (e) {
     search.err = '声音搜索失败：' + (e.message || e)
   }
