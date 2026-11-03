@@ -295,7 +295,13 @@ function currentLine() {
   return { en: '', zh: l.text }
 }
 function pushFloat() {
-  if (state.floatOn) window.api.floatPush(currentLine())
+  if (!state.floatOn) return
+  const t = state.tracks[state.cur]
+  window.api.floatPush({
+    title: t ? cleanTitle(t.title) : '',
+    artist: t ? (t.artist || '') : '',
+    ...currentLine(),
+  })
 }
 
 /* ---------------- 歌词页 ---------------- */
@@ -376,6 +382,12 @@ function bindGlobal() {
   audio.addEventListener('pause', () => setPlayIcon(false))
   audio.addEventListener('ended', () => {
     if (state.cur + 1 < state.tracks.length) play(state.cur + 1)
+  })
+
+  // 悬浮歌词窗发来的 上一曲/下一曲
+  window.api.onPlayerCmd?.((cmd) => {
+    if (cmd === 'prev') play(Math.max(state.cur - 1, 0))
+    else if (cmd === 'next') play(Math.min(state.cur + 1, state.tracks.length - 1))
   })
 
   setPlayIcon(false)
