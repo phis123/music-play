@@ -67,23 +67,175 @@ const setCover = (el, url) => {
 }
 
 /* ---------------- 视图 ---------------- */
+const search = {
+  kw: '',
+  tab: 'song',
+  loading: false,
+  songs: [],
+  voices: [],
+  song: null,
+  err: '',
+  playingVoiceId: null,
+  downloading: {},
+}
+
+const fmtDur = (sec) => {
+  sec = Math.round(sec || 0)
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`
+}
+const fmtPlays = (n) => (n >= 10000 ? (n / 10000).toFixed(1) + '万' : String(n || 0))
+
+function viewSearchBody() {
+  if (search.loading) return `<div class="search-hint">搜索中…</div>`
+  if (search.err) return `<div class="search-hint" style="color:var(--red)">${esc(search.err)}</div>`
+
+  // 播客 Tab：直接列声音
+  if (search.tab === 'voice') {
+    if (!search.voices.length) return `<div class="search-hint">输入关键词，搜索网易云播客里的声音</div>`
+    return voiceListHtml()
+  }
+
+  // 歌曲 Tab：已选歌曲 → 声音列表
+  if (search.song) {
+    return `
+      <div class="result-head">
+        <button id="btnBackSongs" class="btn-ghost">← 返回歌曲列表</button>
+        <span class="result-title">《${esc(search.song.name)}》的相关声音</span>
+      </div>
+      ${search.voices.length ? voiceListHtml() : `<div class="search-hint">没找到匹配的声音</div>`}`
+  }
+
+  if (!search.songs.length) return `<div class="search-hint">输入关键词，搜索网易云歌曲</div>`
+
+  const rows = search.songs.map((s, i) => `
+    <div class="song-row" data-song="${i}">
+      <div class="cov"${s.cover ? ` style="background-image:url(&quot;${esc(s.cover)}&quot;)"` : ''}></div>
+      <div class="s-main">
+        <div class="s-name">${esc(s.name)}${s.fee === 1 ? '<span class="vip">VIP</span>' : ''}</div>
+        <div class="s-sub">${esc(s.artist || '未知艺人')}${s.album ? ' · ' + esc(s.album) : ''}</div>
+      </div>
+      <div class="s-dur">${fmtDur(s.duration)}</div>
+      <button class="btn-sm" data-pick="${i}">找声音</button>
+    </div>`).join('')
+  return `<div class="songlist">${rows}</div>`
+}
+
+function voiceListHtml() {
+  const rows = search.voices.map((v, i) => {
+    const dl = search.downloading[v.voiceId]
+    const playing = search.playingVoiceId === v.voiceId
+    return `
+      <div class="voice-row">
+        <div class="v-main">
+          <div class="v-title">${esc(v.title || '(无标题)')}</div>
+          <div class="v-sub">${esc(v.radio || '未知电台')} · ${fmtDur(v.duration)} · ${fmtPlays(v.plays)}播放</div>
+        </div>
+        <button class="btn-sm" data-preview="${i}">${playing ? '停止' : '试听'}</button>
+        <button class="btn-sm primary" data-download="${i}" ${dl && dl !== '失败' ? 'disabled' : ''}>${dl || '下载'}</button>
+      </div>`
+  }).join('')
+  return `<div class="voicelist">${rows}</div>`
+}
+
 function viewHome() {
+  const tabs = ['song', 'voice'].map((t) => {
+    const label = t === 'song' ? '歌曲' : '播客'
+    return `<button class="tab ${search.tab === t ? 'active' : ''}" data-tab="${t}">${label}</button>`
+  }).join('')
+
   return `
     <div class="home">
       <div class="search-wrap">
         <label class="search-box">
           <span>🔍</span>
-          <input id="searchInput" type="text" placeholder="搜索歌曲 / 歌手 / 播客">
+          <input id="searchInput" type="text" placeholder="搜索歌曲 / 歌手，再挑声音下载"
+                 value="${esc(search.kw)}">
+          <button id="btnSearch">搜索</button>
         </label>
       </div>
-      <div class="search-tabs">
-        <button class="tab ${state.searchTab === 'local' ? 'active' : ''}" data-tab="local">本地库</button>
-        <button class="tab ${state.searchTab === 'podcast' ? 'active' : ''}" data-tab="podcast">播客</button>
-      </div>
-      <div class="search-hint">
-        ${state.searchTab === 'local' ? '输入关键词搜索本地曲库（功能待接入）' : '输入关键词搜索网易云播客声音（功能待接入）'}
-      </div>
+      <div class="search-tabs">${tabs}</div>
+      ${viewSearchBody()}
     </div>`
+}
+
+async function doSearch(explicitKw) {
+  const kw = String(explicitKw || $('#searchInput')?.value || search.kw || '').trim()
+  if (!kw) return
+  search.kw = kw
+  search.err = ''
+  search.songs = []
+  search.voices = []
+  search.song = null
+  search.playingVoiceId = null
+  search.loading = true
+  render()
+  try {
+    if (search.tab === 'song') search.songs = await window.api.searchSongs(kw)
+    else search.voices = await window.api.searchVoices(kw)
+  } catch (e) {
+    search.err = '搜索失败：' + (e.message || e)
+  }
+  search.loading = false
+  render()
+}
+
+async function pickSong(idx) {
+  const song = search.songs[idx]
+  if (!song) return
+  search.song = song
+  search.voices = []
+  search.loading = true
+  render()
+  try {
+    const kw = [song.name, song.artist].filter(Boolean).join(' ')
+    search.voices = await window.api.searchVoices(kw)
+  } catch (e) {
+    search.err = '声音搜索失败：' + (e.message || e)
+  }
+  search.loading = false
+  render()
+}
+
+async function togglePreview(idx) {
+  const v = search.voices[idx]
+  if (!v) return
+  const a = $('#previewAudio')
+  if (search.playingVoiceId === v.voiceId) {
+    a.pause()
+    search.playingVoiceId = null
+    render()
+    return
+  }
+  try {
+    const url = await window.api.preview(v.mainTrackId)
+    if (!url) { search.err = '拿不到试听地址'; render(); return }
+    a.src = url
+    await a.play()
+    search.playingVoiceId = v.voiceId
+  } catch (e) {
+    search.err = '试听失败：' + (e.message || e)
+  }
+  render()
+}
+
+async function doDownload(idx) {
+  const v = search.voices[idx]
+  if (!v) return
+  search.downloading[v.voiceId] = '下载中…'
+  render()
+  try {
+    const r = await window.api.downloadVoice({ voice: v, song: search.song || { name: v.title } })
+    search.downloading[v.voiceId] = '已保存'
+    try {
+      const lib = await window.api.scan(state.root)
+      state.tracks = lib.tracks
+      state.root = lib.root
+    } catch { }
+  } catch (e) {
+    search.downloading[v.voiceId] = '失败'
+    search.err = '下载失败：' + (e.message || e)
+  }
+  render()
 }
 
 function viewLocal() {
@@ -129,13 +281,24 @@ function render() {
 
   if (hash === '#/home') {
     const input = $('#searchInput')
-    input?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') console.log('搜索（待接入）:', input.value)
-    })
+    input?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch() })
+    $('#btnSearch')?.addEventListener('click', doSearch)
     $$('.tab').forEach((el) => el.addEventListener('click', () => {
-      state.searchTab = el.dataset.tab
+      search.tab = el.dataset.tab
+      search.song = null
+      search.songs = []
+      search.voices = []
       render()
+      if (search.kw) doSearch()
     }))
+    $$('[data-pick]').forEach((el) => el.addEventListener('click', (e) => {
+      e.stopPropagation()
+      pickSong(+el.dataset.pick)
+    }))
+    $$('.song-row').forEach((el) => el.addEventListener('click', () => pickSong(+el.dataset.song)))
+    $$('[data-preview]').forEach((el) => el.addEventListener('click', () => togglePreview(+el.dataset.preview)))
+    $$('[data-download]').forEach((el) => el.addEventListener('click', () => doDownload(+el.dataset.download)))
+    $('#btnBackSongs')?.addEventListener('click', () => { search.song = null; search.voices = []; render() })
   }
   if (hash === '#/local') {
     $$('.track-row').forEach((el) => el.addEventListener('click', () => play(+el.dataset.i)))
@@ -357,6 +520,10 @@ function bindGlobal() {
   })
   $('#pbInfo').addEventListener('click', openLyrics)
   $('#pbLyrics').addEventListener('click', openLyrics)
+  $('#pbFloat').addEventListener('contextmenu', (e) => {
+    e.preventDefault()
+    window.api.floatMenu?.()
+  })
   $('#pbFloat').addEventListener('click', async () => {
     const on = await window.api.floatToggle()
     state.floatOn = on
