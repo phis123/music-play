@@ -105,6 +105,7 @@ function normVoice(r) {
   const ui = r.uiElement || {}
   const radio = bi.radio || {}
   return {
+    cover: thumb(bi.coverUrl || (radio && radio.picUrl) || (ui.image && ui.image.imageUrl) || ''),
     voiceId: r.resourceId,
     title: (ui.mainTitle && ui.mainTitle.title) || '',
     sub: ui.subTitle || '',
