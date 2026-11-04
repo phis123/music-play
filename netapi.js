@@ -221,6 +221,27 @@ function sanitize(name) {
   return String(name).replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 80)
 }
 
+/* ---------------- 高清封面 ---------------- */
+function hiResCover(url, size = 600) {
+  if (!url) return ''
+  const base = String(url).split('?')[0]
+  return `${base}?param=${size}y${size}`
+}
+
+/** 取歌曲封面图片（尽量高清）；没有 cover 时按歌名再搜一次 */
+async function coverBuffer(song) {
+  let url = song && song.cover ? hiResCover(song.cover) : ''
+  if (!url && song && song.name) {
+    try {
+      const list = await searchSongs([song.name, song.artist].filter(Boolean).join(' '), 3)
+      const hit = list.find((x) => x.cover) || list[0]
+      if (hit && hit.cover) url = hiResCover(hit.cover)
+    } catch { }
+  }
+  if (!url) return null
+  try { return await fetchBuffer(url) } catch { return null }
+}
+
 async function fetchBuffer(url) {
   return new Promise((resolve, reject) => {
     const mod = url.startsWith('https') ? https : http
@@ -280,10 +301,9 @@ async function downloadVoice({ voice, song, dir }) {
     const ar = song && song.artist ? String(song.artist).split('/')[0].trim() : ''
     if (ar) tags.artist = ar
     if (song && song.album) tags.album = song.album
-    let imgBuf = null
-    const coverUrl = (song && song.cover) || voice.cover || ''
-    if (coverUrl) {
-      try { imgBuf = await fetchBuffer(coverUrl) } catch { imgBuf = null }
+    const imgBuf = await coverBuffer(song && song.cover ? song : { name: (song && song.name) || voice.title, artist: song && song.artist, cover: (song && song.cover) || voice.cover })
+    if (imgBuf && imgBuf.length) {
+      try { fs.writeFileSync(file.replace(/\.[^.]+$/, '') + '.jpg', imgBuf) } catch { }
     }
     if (imgBuf && imgBuf.length) {
       tags.image = { mime: 'image/jpeg', type: { id: 3, name: 'front cover' }, description: 'cover', imageBuffer: imgBuf }
@@ -455,6 +475,8 @@ module.exports = {
   songDetail,
   trackUrl,
   trackInfo,
+  coverBuffer,
+  hiResCover,
   lyric,
   downloadVoice,
   getPort: () => ncmPort,
