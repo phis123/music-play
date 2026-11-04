@@ -634,3 +634,5 @@ body {
 }
 .off-group button:hover { border-color: var(--red); color: var(--red); }
 .off-group .chip { margin-left: 0; }
+/* 音质标签 */
+.badge.kbps-badge { color: var(--dim); border-color: var(--line); margin-left: 4px; }
