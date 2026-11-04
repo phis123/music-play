@@ -1,5 +1,5 @@
 // music-play · 主进程
-const { app, BrowserWindow, ipcMain, dialog, screen, globalShortcut, Tray, Menu, nativeImage } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, screen, globalShortcut, Tray, Menu, nativeImage, shell } = require('electron')
 const netapi = require('./netapi')
 const path = require('path')
 const fs = require('fs')
@@ -238,6 +238,23 @@ ipcMain.handle('lib:coverFix', async (_e, tracks) => {
   }
   coverCache.clear()
   return { done, total: list.length }
+})
+
+ipcMain.handle('lib:delete', async (_e, filePath) => {
+  try {
+    const base = String(filePath).replace(/\.[^.]+$/, '')
+    const targets = [filePath, base + '.lrc', base + '.jpg']
+    let removed = 0
+    for (const f of targets) {
+      if (!fs.existsSync(f)) continue
+      try { await shell.trashItem(f); removed++ }
+      catch { try { await fsp.unlink(f); removed++ } catch { } }
+    }
+    coverCache.delete(filePath)
+    return { ok: true, removed }
+  } catch (e) {
+    return { ok: false, reason: String(e.message || e) }
+  }
 })
 
 ipcMain.handle('app:info', () => ({
