@@ -75,7 +75,7 @@ ipcMain.handle('library:scan', async (_e, dir) => {
   const tracks = []
   for (const f of files.slice(0, 5000)) {
     let title = path.basename(f, path.extname(f))
-    let artist = '', album = '', duration = 0
+    let artist = '', album = '', duration = 0, bitrate = 0
     if (mm) {
       try {
         const meta = await mm.parseFile(f, { duration: true, skipCovers: true })
@@ -83,6 +83,7 @@ ipcMain.handle('library:scan', async (_e, dir) => {
         artist = meta.common.artist || ''
         album = meta.common.album || ''
         duration = meta.format.duration || 0
+        bitrate = Math.round((meta.format.bitrate || 0) / 1000)
       } catch { /* 退回文件名 */ }
     }
     // 没有标签时用文件名兜底
@@ -91,7 +92,7 @@ ipcMain.handle('library:scan', async (_e, dir) => {
       if (g.artist) { title = g.title; artist = g.artist }
     }
     const lrcPath = path.join(path.dirname(f), path.basename(f, path.extname(f)) + '.lrc')
-    tracks.push({ path: f, title, artist, album, duration, hasLrc: fs.existsSync(lrcPath) })
+    tracks.push({ path: f, title, artist, album, duration, bitrate, hasLrc: fs.existsSync(lrcPath) })
   }
   tracks.sort((a, b) => a.title.localeCompare(b.title, 'zh'))
   return { root: target, tracks }
