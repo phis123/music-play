@@ -512,6 +512,18 @@ async function rescan() {
   } catch { }
 }
 
+async function fixCovers() {
+  const btn = $('#btnFixCover')
+  if (btn) { btn.disabled = true; btn.textContent = '处理中…' }
+  try {
+    const r = await window.api.coverFix(state.tracks)
+    alert(`已补 ${r.done} 张高清封面（检查了 ${r.total} 首）`)
+  } catch (e) {
+    alert('补封面失败：' + (e.message || e))
+  }
+  await rescan()
+  render()
+}
 async function pickRoot() {
   const dir = await window.api.pickFolder()
   if (!dir) return
@@ -578,7 +590,8 @@ function viewLocal() {
         </div>
         <div class="page-actions">
           <button id="btnPickRoot" class="btn-sm">选择文件夹</button>
-          <button id="btnImport" class="btn-sm primary">批量导入</button>
+          <button id="btnFixCover" class="btn-sm">补高清封面</button>
+        <button id="btnImport" class="btn-sm primary">批量导入</button>
         </div>
       </div>
       <div class="empty-note"><div class="big">还没有歌曲</div><div>扫描目录为空，或标签读取失败</div></div>`
