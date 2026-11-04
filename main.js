@@ -142,8 +142,17 @@ ipcMain.handle('lyrics:get', async (_e, filePath) => {
 
 // ---------- 封面（带缓存，按需取） ----------
 const coverCache = new Map()
+const fileUrl = (p) => 'file:///' + encodeURI(String(p).replace(/\\/g, '/'))
+
 ipcMain.handle('cover:get', async (_e, filePath) => {
   if (coverCache.has(filePath)) return coverCache.get(filePath)
+  // 优先用侧车高清封面（下载时写的 .jpg）
+  const sideCover = filePath.replace(/\.[^.]+$/, '') + '.jpg'
+  if (fs.existsSync(sideCover)) {
+    const u = fileUrl(sideCover)
+    coverCache.set(filePath, u)
+    return u
+  }
   let url = ''
   try {
     const mm = await mmModule()
@@ -214,6 +223,21 @@ ipcMain.handle('lib:fav', async (_e, { filePath, on }) => {
   } catch (e) {
     return { ok: false, reason: String(e.message || e) }
   }
+})
+
+ipcMain.handle('lib:coverFix', async (_e, tracks) => {
+  const list = Array.isArray(tracks) ? tracks.slice(0, 40) : []
+  let done = 0
+  for (const t of list) {
+    const side = String(t.path).replace(/\.[^.]+$/, '') + '.jpg'
+    if (fs.existsSync(side)) continue
+    try {
+      const buf = await netapi.coverBuffer({ name: t.title, artist: t.artist, cover: t.cover })
+      if (buf && buf.length) { fs.writeFileSync(side, buf); done++ }
+    } catch { }
+  }
+  coverCache.clear()
+  return { done, total: list.length }
 })
 
 ipcMain.handle('app:info', () => ({
