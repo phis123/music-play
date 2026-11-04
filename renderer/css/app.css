@@ -549,9 +549,9 @@ body {
 .page-actions { display: flex; gap: 8px; padding-bottom: 16px; }
 
 .track-row {
-  grid-template-columns: 34px 40px 1fr 180px 62px 64px;
+  grid-template-columns: 34px 40px 1fr 180px 56px 96px;
 }
-.row-acts { display: flex; gap: 4px; justify-content: flex-end; }
+.row-acts { display: flex; gap: 6px; justify-content: flex-end; }
 .act {
   width: 26px; height: 26px;
   border-radius: 50%;
@@ -636,3 +636,11 @@ body {
 .off-group .chip { margin-left: 0; }
 /* 音质标签 */
 .badge.kbps-badge { color: var(--dim); border-color: var(--line); margin-left: 4px; }
+.act.del { font-size: 12px; }
+.act.del:hover { background: var(--red); color: #fff; border-color: var(--red); }
+
+/* 线性 SVG 图标 */
+.nav-item .ico { display: inline-flex; align-items: center; justify-content: center; }
+.nav-item .ico svg { width: 14px; height: 14px; display: block; }
+.act svg { width: 13px; height: 13px; display: block; margin: 0 auto; }
+.act.del { font-size: 0; }
