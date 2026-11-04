@@ -10,7 +10,8 @@
   "keywords": ["music", "player", "lyrics", "lrc", "bilingual", "electron"],
   "license": "MIT",
   "dependencies": {
-    "music-metadata": "^12.3.3"
+    "music-metadata": "^12.3.3",
+    "node-id3": "^0.2.9"
   },
   "devDependencies": {
     "electron": "31.7.7"
