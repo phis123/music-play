@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('api', {
   info: () => ipcRenderer.invoke('app:info'),
   fav: (payload) => ipcRenderer.invoke('lib:fav', payload),
   coverFix: (tracks) => ipcRenderer.invoke('lib:coverFix', tracks),
+  remove: (filePath) => ipcRenderer.invoke('lib:delete', filePath),
   searchSongs: (kw) => ipcRenderer.invoke('net:songs', kw),
   searchVoices: (kw) => ipcRenderer.invoke('net:voices', kw),
   preview: (trackId) => ipcRenderer.invoke('net:preview', trackId),
