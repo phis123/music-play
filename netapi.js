@@ -348,12 +348,32 @@ function rankVoices(list, clean, duration) {
   return list.map(strip)
 }
 
-function strip(v) { delete v._t; delete v._d; return v }module.exports = {
+function strip(v) { delete v._t; delete v._d; return v }
+/* ---------------- 歌单曲目 ---------------- */
+async function playlistSongs(id) {
+  await ensureServer()
+  const d = await get(`/playlist/detail?${qs({ id })}`)
+  const bag = d.data || d
+  const pl = bag.playlist || {}
+  const tracks = pl.tracks || []
+  return { name: pl.name || '', cover: pl.coverImgUrl || '', songs: tracks.map(normSong) }
+}
+
+async function songDetail(id) {
+  await ensureServer()
+  const d = await get(`/song/detail?${qs({ ids: String(id) })}`)
+  const bag = d.data || d
+  return (bag.songs || []).map(normSong)
+}
+
+module.exports = {
   autoLyric,
   ensureServer,
   searchSongs,
   searchVoices,
   searchVoicesSmart,
+  playlistSongs,
+  songDetail,
   trackUrl,
   lyric,
   downloadVoice,
