@@ -322,6 +322,7 @@ function createFloatWindow() {
       nodeIntegration: false,
     },
   })
+  try { if (!tray) createTray() } catch { }
   floatWin.setAlwaysOnTop(true, 'screen-saver')
   floatWin.setVisibleOnAllWorkspaces(true)
   floatWin.loadFile(path.join(__dirname, 'renderer', 'float.html'))
@@ -330,7 +331,11 @@ function createFloatWindow() {
       floatWin.webContents.send('float:keyinfo', { key: unlockKey, locked: floatLocked })
     }
   })
-  floatWin.on('closed', () => { floatWin = null; floatLocked = false })
+  floatWin.on('closed', () => {
+    floatWin = null
+    floatLocked = false
+    try { if (tray) { tray.destroy(); tray = null } } catch { }
+  })
   return floatWin
 }
 
@@ -394,11 +399,13 @@ function setFloatLock(locked) {
 
 app.whenReady().then(() => {
   createWindow()
-  createTray()
   registerUnlockShortcut()
   netapi.ensureServer().catch((e) => console.warn('[ncm] 启动失败:', e.message))
 })
-app.on('will-quit', () => globalShortcut.unregisterAll())
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll()
+  try { if (tray) { tray.destroy(); tray = null } } catch { }
+})
 app.on('second-instance', () => {
   if (win && !win.isDestroyed()) {
     if (win.isMinimized()) win.restore()
