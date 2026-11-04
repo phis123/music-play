@@ -29,6 +29,26 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': 
 const toFileUrl = (p) => 'file:///' + String(p).replace(/\\/g, '/').split('/')
   .map((seg, i) => (i === 0 ? seg : encodeURIComponent(seg))).join('/')
 
+/* ---------------- 最近播放 ---------------- */
+const RECENT_KEY = 'recentTracks'
+
+function getRecent() {
+  try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]') } catch { return [] }
+}
+function pushRecent(t) {
+  if (!t || !t.path) return
+  const list = getRecent().filter((x) => x.path !== t.path)
+  list.unshift({ path: t.path, title: t.title, artist: t.artist, duration: t.duration, at: Date.now() })
+  localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, 30)))
+}
+async function playPath(p) {
+  const idx = state.tracks.findIndex((t) => t.path === p)
+  if (idx >= 0) return play(idx)
+  const rec = getRecent().find((x) => x.path === p)
+  const base = String(p).split(/[\\/]/).pop()
+  return playTrack(rec ? { ...rec, hasLrc: false } : { path: p, title: base }, -1)
+}
+
 /* ---------------- 封面加载队列（限并发） ---------------- */
 const coverQ = []
 let coverBusy = 0
@@ -197,19 +217,27 @@ async function pickSong(idx) {
   render()
 }
 
+function stopPreview() {
+  const a = $('#previewAudio')
+  if (!a) return
+  try { a.pause() } catch { }
+  try { a.removeAttribute('src'); a.load() } catch { }
+  search.playingVoiceId = null
+}
+
 async function togglePreview(idx) {
   const v = search.voices[idx]
   if (!v) return
   const a = $('#previewAudio')
   if (search.playingVoiceId === v.voiceId) {
-    a.pause()
-    search.playingVoiceId = null
+    stopPreview()
     render()
     return
   }
   try {
     const url = await window.api.preview(v.mainTrackId)
     if (!url) { search.err = '拿不到试听地址'; render(); return }
+    stopPreview()
     a.src = url
     await a.play()
     search.playingVoiceId = v.voiceId
@@ -239,22 +267,332 @@ async function doDownload(idx) {
   render()
 }
 
-function viewLocal() {
-  if (!state.tracks.length) {
-    return `<div class="page-title">本地音乐</div>
-      <div class="page-sub">${esc(state.root)}</div>
-      <div class="empty-note"><div class="big">还没有歌曲</div><div>扫描目录为空，或标签读取失败</div></div>`
+/* ---------------- 批量导入 ---------------- */
+const imp = { link: '', loading: false, name: '', items: [], err: '', busy: false, done: 0 }
+
+function parseShareLink(text) {
+  const t = String(text || '')
+  const mp = t.match(/playlist[^0-9]{0,12}(\d{5,})/) || t.match(/playlist\/(\d+)/)
+  const ms = t.match(/song[^0-9]{0,12}(\d{5,})/) || t.match(/song\/(\d+)/)
+  if (mp) return { type: 'playlist', id: mp[1] }
+  if (ms) return { type: 'song', id: ms[1] }
+  const m = t.match(/(\d{6,})/)
+  if (m) return { type: 'playlist', id: m[1] }
+  return null
+}
+
+function importRowHtml(it, i) {
+  const v = it.voices[it.pick]
+  const st = it.skip ? '<span class="imp-st skip">已跳过</span>'
+    : it.done ? '<span class="imp-st ok">已下载</span>'
+    : v ? '<span class="imp-st">已匹配</span>'
+    : '<span class="imp-st warn">未找到</span>'
+  const vo = v
+    ? `<div class="imp-v">${esc(v.title)}<span class="imp-v-sub">${esc(v.radio)} · ${fmt(v.duration)} · ${fmtPlays(v.plays)}播放</span></div>`
+    : '<div class="imp-v muted">没有可用候选项</div>'
+  return `<div class="imp-row">
+    <div class="imp-main">
+      <div class="imp-name">${i + 1}. ${esc(it.song.name)}<span class="imp-artist">${esc(it.song.artist || '')}</span></div>
+      ${vo}
+    </div>
+    <div class="imp-right">${st}
+      <button class="btn-sm" data-imp-swap="${i}" ${it.skip || it.done ? 'disabled' : ''}>换</button>
+      <button class="btn-sm" data-imp-skip="${i}" ${it.done ? 'disabled' : ''}>${it.skip ? '恢复' : '跳过'}</button>
+    </div>
+  </div>`
+}
+
+function viewImport() {
+  const total = imp.items.length
+  const usable = imp.items.filter((x) => !x.skip && !x.done && x.voices[x.pick]).length
+  const body = imp.loading
+    ? '<div class="search-hint">解析中…</div>'
+    : imp.err ? `<div class="search-hint" style="color:var(--red)">${esc(imp.err)}</div>`
+    : total ? `<div class="imp-list">${imp.items.map(importRowHtml).join('')}</div>`
+    : '<div class="search-hint">粘贴网易云歌单/歌曲分享链接，自动匹配播客声音</div>'
+  return `<div class="page-title">批量导入</div>
+    <div class="page-sub">粘贴分享链接（歌单或单曲），自动找对应的播客声音</div>
+    <div class="imp-bar">
+      <input id="impLink" value="${esc(imp.link)}" placeholder="https://music.163.com/playlist?id=...">
+      <button id="impParse" class="btn-sm primary">${total ? '重新解析' : '解析'}</button>
+      ${usable ? `<button id="impAll" class="btn-sm primary" ${imp.busy ? 'disabled' : ''}>下载全部（${usable}）</button>` : ''}
+    </div>
+    ${body}`
+}
+
+async function doImportParse() {
+  const link = ($('#impLink')?.value || imp.link || '').trim()
+  const parsed = parseShareLink(link)
+  imp.link = link
+  imp.items = []
+  imp.err = ''
+  if (!parsed) { imp.err = '没识别出歌单/歌曲 ID，请检查链接'; render(); return }
+  imp.loading = true
+  render()
+  try {
+    let songs = []
+    if (parsed.type === 'playlist') {
+      const pl = await window.api.playlist(parsed.id)
+      imp.name = pl.name
+      songs = pl.songs || []
+    } else {
+      songs = await window.api.songDetail(parsed.id)
+      imp.name = songs[0] ? songs[0].name : ''
+    }
+    if (!songs.length) imp.err = '这个链接里没有歌曲'
+    imp.items = songs.map((sg) => ({ song: sg, voices: [], pick: 0, skip: false, done: false }))
+  } catch (e) {
+    imp.err = '解析失败：' + (e.message || e)
   }
-  const rows = state.tracks.map((t, i) => `
-    <div class="track-row ${i === state.cur ? 'active' : ''}" data-i="${i}">
+  imp.loading = false
+  render()
+  matchAllImport()
+}
+
+async function matchAllImport() {
+  for (const it of imp.items) {
+    if (it.voices.length) continue
+    try {
+      it.voices = await window.api.searchVoices({ name: it.song.name, artist: it.song.artist, duration: it.song.duration })
+    } catch { it.voices = [] }
+    render()
+  }
+}
+
+async function importSwap(i) {
+  const it = imp.items[i]
+  if (!it) return
+  it.pick += 1
+  if (it.pick < it.voices.length) { render(); return }
+  const kw = prompt('换个关键词重新搜声音（留空取消）', it.song.name)
+  if (!kw) { it.pick = Math.max(0, it.pick - 1); render(); return }
+  try {
+    const list = await window.api.searchVoices(kw)
+    it.voices = list
+    it.pick = 0
+  } catch { it.pick = Math.max(0, it.pick - 1) }
+  render()
+}
+
+async function importAll() {
+  imp.busy = true
+  render()
+  for (const it of imp.items) {
+    if (it.skip || it.done) continue
+    const v = it.voices[it.pick]
+    if (!v) continue
+    try {
+      await window.api.downloadVoice({ voice: v, song: it.song })
+      it.done = true
+    } catch (e) { /* 单个失败继续 */ }
+    render()
+  }
+  imp.busy = false
+  await rescan()
+  render()
+}
+
+/* ---------------- 歌单 ---------------- */
+const PL_KEY = 'playlists'
+const DEF_PL = [{ id: '1', name: '新建歌单', tracks: [] }, { id: '2', name: '我的歌单', tracks: [] }]
+
+function getPlaylists() {
+  try {
+    const v = JSON.parse(localStorage.getItem(PL_KEY) || 'null')
+    if (Array.isArray(v) && v.length) return v
+  } catch { }
+  return DEF_PL.map((x) => ({ ...x, tracks: [] }))
+}
+function savePlaylists(v) { localStorage.setItem(PL_KEY, JSON.stringify(v)) }
+
+function renderSidebar() {
+  const el = document.getElementById('plList')
+  if (!el) return
+  el.innerHTML = getPlaylists().map((p) =>
+    `<a class="nav-item" data-route="#/playlist/${p.id}"><span class="ico">▸</span>` +
+    `<span class="pl-name">${esc(p.name)}</span><span class="pl-n">${p.tracks.length}</span></a>`
+  ).join('')
+  el.querySelectorAll('.nav-item').forEach((a) => {
+    a.addEventListener('click', () => { location.hash = a.dataset.route })
+  })
+  $$('.nav-item').forEach((el2) => el2.classList.toggle('active', el2.dataset.route === location.hash))
+}
+
+function closeAddMenu() {
+  document.getElementById('addMenu')?.remove()
+}
+function openAddMenu(t, anchor) {
+  closeAddMenu()
+  const list = getPlaylists()
+  const menu = document.createElement('div')
+  menu.id = 'addMenu'
+  menu.className = 'add-menu'
+  menu.innerHTML = '<div class="am-title">加入歌单</div>' +
+    list.map((p) => `<button data-pl="${p.id}">${esc(p.name)}<span class="am-n">${p.tracks.length}</span></button>`).join('') +
+    '<button data-pl-new="1" class="am-new">＋ 新建歌单</button>'
+  document.body.appendChild(menu)
+  const r = anchor.getBoundingClientRect()
+  menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 230)) + 'px'
+  menu.style.top = Math.min(r.bottom + 6, window.innerHeight - 200) + 'px'
+  menu.addEventListener('click', (e) => {
+    e.stopPropagation()
+    const b = e.target.closest('button')
+    if (!b) return
+    if (b.dataset.plNew) {
+      const name = prompt('歌单名称', '新歌单')
+      if (!name) return
+      const v = getPlaylists()
+      v.push({ id: String(Date.now()), name, tracks: [] })
+      savePlaylists(v)
+      closeAddMenu()
+      renderSidebar()
+      return
+    }
+    const v = getPlaylists()
+    const pl = v.find((x) => x.id === b.dataset.pl)
+    if (!pl) return
+    if (!pl.tracks.some((x) => x.path === t.path)) {
+      pl.tracks.push({ path: t.path, title: t.title, artist: t.artist, duration: t.duration })
+    }
+    savePlaylists(v)
+    closeAddMenu()
+    renderSidebar()
+    render()
+  })
+  setTimeout(() => document.addEventListener('click', closeAddMenu, { once: true }), 0)
+}
+
+function viewPlaylist(id) {
+  const pl = getPlaylists().find((p) => p.id === id)
+  if (!pl) return viewEmpty('歌单不存在', '可能已被删除')
+  if (!pl.tracks.length) return viewEmpty(pl.name, '这个歌单还没有歌曲（点歌曲右边的 ＋ 加入）')
+  const rows = pl.tracks.map((t, i) => {
+    const idx = state.tracks.findIndex((x) => x.path === t.path)
+    return `<div class="track-row" data-path="${esc(t.path)}">
       <div class="idx">${i + 1}</div>
-      <div class="cov" data-cov="${i}"></div>
+      <div class="cov" data-plcov="${i}"></div>
+      <div class="tt">${esc(cleanTitle(t.title))}</div>
+      <div class="ar">${esc(t.artist || '未知艺人')}</div>
+      <div class="du">${fmt(t.duration || 0)}</div>
+      <div class="row-acts"><button class="act" data-plrm="${i}" title="移出歌单">✕</button></div>
+    </div>`
+  }).join('')
+  return `<div class="page-title">${esc(pl.name)}</div>
+    <div class="page-sub">共 ${pl.tracks.length} 首</div>
+    <div class="tracklist">${rows}</div>`
+}
+
+/* ---------------- 我喜欢的音乐 ---------------- */
+const FAV_KEY = 'favPaths'
+const FAV_DIR = '我喜欢的音乐'
+
+function favSet() {
+  try { return new Set(JSON.parse(localStorage.getItem(FAV_KEY) || '[]')) } catch { return new Set() }
+}
+const isFav = (p) => favSet().has(p)
+
+async function toggleFav(t) {
+  if (!t || !t.path) return
+  const set = favSet()
+  const on = !set.has(t.path)
+  const r = await window.api.fav({ filePath: t.path, on })
+  if (!r || !r.ok) { alert('操作失败：' + ((r && r.reason) || '未知错误')); return }
+  if (on) set.add(t.path); else set.delete(t.path)
+  localStorage.setItem(FAV_KEY, JSON.stringify([...set]))
+  await rescan()
+  render()
+}
+
+async function rescan() {
+  try {
+    const lib = await window.api.scan(state.root)
+    state.tracks = lib.tracks
+    state.root = lib.root
+  } catch { }
+}
+
+async function pickRoot() {
+  const dir = await window.api.pickFolder()
+  if (!dir) return
+  const lib = await window.api.scan(dir)
+  state.tracks = lib.tracks
+  state.root = lib.root
+  render()
+}
+
+/* ---------------- 我喜欢的音乐视图 ---------------- */
+function favTracks() {
+  return state.tracks.filter((t) => t.path.includes('\\' + FAV_DIR + '\\'))
+}
+function viewLiked() {
+  const list = favTracks()
+  if (!list.length) return viewEmpty('我喜欢的音乐', '点歌曲右边的 ♥ 收藏，文件会复制到「' + FAV_DIR + '」文件夹')
+  const rows = list.map((t, i) => trackRowHtml(t, state.tracks.indexOf(t), i + 1)).join('')
+  return `<div class="page-title">我喜欢的音乐</div>
+    <div class="page-sub">共 ${list.length} 首 · ${esc(state.root)}\\${FAV_DIR}</div>
+    <div class="tracklist">${rows}</div>`
+}
+
+/* ---------------- 行模板（带 ♥ / ＋） ---------------- */
+function trackRowHtml(t, idx, no) {
+  return `
+    <div class="track-row" data-i="${idx}">
+      <div class="idx">${no != null ? no : idx + 1}</div>
+      <div class="cov" data-rowcov="${idx}"></div>
       <div class="tt">${esc(cleanTitle(t.title))}${t.hasLrc ? '<span class="badge">词</span>' : ''}</div>
       <div class="ar">${esc(t.artist || '未知艺人')}</div>
-      <div class="du">${fmt(t.duration)}</div>
-    </div>`).join('')
-  return `<div class="page-title">本地音乐</div>
-    <div class="page-sub">共 ${state.tracks.length} 首 · ${esc(state.root)}</div>
+      <div class="du">${fmt(t.duration || 0)}</div>
+      <div class="row-acts">
+        <button class="act${isFav(t.path) ? ' on' : ''}" data-fav="${idx}" title="喜欢">♥</button>
+        <button class="act" data-pladd="${idx}" title="加入歌单">＋</button>
+      </div>
+    </div>`
+}
+
+function viewRecent() {
+  const list = getRecent()
+  if (!list.length) return viewEmpty('最近播放', '播放过的歌会出现在这里（最多 30 首）')
+  const rows = list.map((t, i) => {
+    const idx = state.tracks.findIndex((x) => x.path === t.path)
+    if (idx >= 0) return trackRowHtml(state.tracks[idx], idx, i + 1)
+    return `<div class="track-row" data-path="${esc(t.path)}">
+      <div class="idx">${i + 1}</div>
+      <div class="cov" data-recent-cov="${i}"></div>
+      <div class="tt">${esc(cleanTitle(t.title))}</div>
+      <div class="ar">${esc(t.artist || '未知艺人')}</div>
+      <div class="du">${fmt(t.duration || 0)}</div>
+    </div>`
+  }).join('')
+  return `<div class="page-title">最近播放</div>
+    <div class="page-sub">最近 ${list.length} 首</div>
+    <div class="tracklist">${rows}</div>`
+}
+
+function viewLocal() {
+  if (!state.tracks.length) {
+    return `<div class="page-head">
+        <div>
+          <div class="page-title">本地音乐</div>
+          <div class="page-sub">${esc(state.root)}</div>
+        </div>
+        <div class="page-actions">
+          <button id="btnPickRoot" class="btn-sm">选择文件夹</button>
+          <button id="btnImport" class="btn-sm primary">批量导入</button>
+        </div>
+      </div>
+      <div class="empty-note"><div class="big">还没有歌曲</div><div>扫描目录为空，或标签读取失败</div></div>`
+  }
+  const rows = state.tracks.map((t, i) => trackRowHtml(t, i)).join('')
+  return `<div class="page-head">
+      <div>
+        <div class="page-title">本地音乐</div>
+        <div class="page-sub">共 ${state.tracks.length} 首 · ${esc(state.root)}</div>
+      </div>
+      <div class="page-actions">
+        <button id="btnPickRoot" class="btn-sm">选择文件夹</button>
+        <button id="btnImport" class="btn-sm primary">批量导入</button>
+      </div>
+    </div>
     <div class="tracklist">${rows}</div>`
 }
 
@@ -266,18 +604,43 @@ function viewEmpty(title, desc) {
 
 const routes = {
   '#/home': viewHome,
-  '#/liked': () => viewEmpty('我喜欢的音乐', '收藏的歌曲会出现在这里'),
-  '#/recent': () => viewEmpty('最近播放', '最近听过的歌会出现在这里'),
+  '#/liked': viewLiked,
+  '#/recent': viewRecent,
   '#/local': viewLocal,
-  '#/playlist/1': () => viewEmpty('新建歌单', '这个歌单还没有歌曲'),
-  '#/playlist/2': () => viewEmpty('我的歌单', '这个歌单还没有歌曲'),
+  '#/import': viewImport,
+}
+
+let __actsBound = false
+function bindRowActions() {
+  if (__actsBound) return
+  __actsBound = true
+  const view = document.getElementById('view')
+  view.addEventListener('click', (e) => {
+    const fav = e.target.closest('[data-fav]')
+    if (fav) {
+      e.stopPropagation()
+      const t = state.tracks[+fav.dataset.fav]
+      if (t) toggleFav(t)
+      return
+    }
+    const add = e.target.closest('[data-pladd]')
+    if (add) {
+      e.stopPropagation()
+      const t = state.tracks[+add.dataset.pladd]
+      if (t) openAddMenu(t, add)
+    }
+  })
 }
 
 function render() {
   const hash = location.hash || '#/home'
-  const fn = routes[hash] || viewHome
+  let fn = routes[hash]
+  if (!fn && hash.startsWith('#/playlist/')) fn = () => viewPlaylist(hash.split('/').pop())
+  if (!fn) fn = viewHome
   $('#view').innerHTML = fn()
   $('#view').scrollTop = 0
+  bindRowActions()
+  renderSidebar()
   $$('.nav-item').forEach((el) => el.classList.toggle('active', el.dataset.route === hash))
 
   if (hash === '#/home') {
@@ -301,8 +664,46 @@ function render() {
     $$('[data-download]').forEach((el) => el.addEventListener('click', () => doDownload(+el.dataset.download)))
     $('#btnBackSongs')?.addEventListener('click', () => { search.song = null; search.voices = []; render() })
   }
+  if (hash.startsWith('#/playlist/')) {
+    const pl = getPlaylists().find((p) => p.id === hash.split('/').pop())
+    $$('.track-row').forEach((el) => el.addEventListener('click', () => playPath(el.dataset.path)))
+    $$('[data-plcov]').forEach((el) => {
+      const t = pl && pl.tracks[+el.dataset.plcov]
+      if (t) loadCover(t.path, (url) => setCover(el, url))
+    })
+    $$('[data-plrm]').forEach((el) => el.addEventListener('click', (e) => {
+      e.stopPropagation()
+      const v = getPlaylists()
+      const p2 = v.find((x) => x.id === hash.split('/').pop())
+      if (p2) { p2.tracks.splice(+el.dataset.plrm, 1); savePlaylists(v); renderSidebar(); render() }
+    }))
+  }
+  if (hash === '#/recent') {
+    $$('.track-row').forEach((el) => el.addEventListener('click', () => playPath(el.dataset.path)))
+    const list = getRecent()
+    $$('[data-recent-cov]').forEach((el) => {
+      const t = list[+el.dataset.recentCov]
+      if (t) loadCover(t.path, (url) => setCover(el, url))
+    })
+  }
+  if (hash === '#/import') {
+    $('#impParse')?.addEventListener('click', doImportParse)
+    $('#impLink')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doImportParse() })
+    $('#impAll')?.addEventListener('click', importAll)
+    $$('[data-imp-swap]').forEach((el) => el.addEventListener('click', () => importSwap(+el.dataset.impSwap)))
+    $$('[data-imp-skip]').forEach((el) => el.addEventListener('click', () => {
+      const it = imp.items[+el.dataset.impSkip]
+      if (it) { it.skip = !it.skip; render() }
+    }))
+  }
+  $$('[data-rowcov]').forEach((el) => {
+    const t = state.tracks[+el.dataset.rowcov]
+    if (t) loadCover(t.path, (url) => setCover(el, url))
+  })
   if (hash === '#/local') {
     $$('.track-row').forEach((el) => el.addEventListener('click', () => play(+el.dataset.i)))
+    $('#btnPickRoot')?.addEventListener('click', pickRoot)
+    $('#btnImport')?.addEventListener('click', () => { location.hash = '#/import' })
     // 懒加载列表封面
     $$('[data-cov]').forEach((el) => {
       const t = state.tracks[+el.dataset.cov]
@@ -312,13 +713,21 @@ function render() {
 }
 
 /* ---------------- 播放 ---------------- */
-async function play(i) {
+function play(i) {
   if (i < 0 || i >= state.tracks.length) return
-  state.cur = i
-  const t = state.tracks[i]
+  return playTrack(state.tracks[i], i)
+}
 
+async function playTrack(t, i) {
+  if (!t) return
+  state.cur = i
+  pushRecent(t)
+
+  stopPreview()
   audio.src = toFileUrl(t.path)
   audio.play().catch((e) => console.warn('播放失败', e))
+  $$('.track-row').forEach((el) => el.classList.toggle('active', +el.dataset.i === i))
+  $('#pbFav')?.classList.toggle('on', isFav(t.path))
 
   const title = cleanTitle(t.title)
   $('#pbTitle').textContent = title
@@ -607,6 +1016,15 @@ function bindGlobal() {
     if (!audio.duration) return
     audio.currentTime = (e.target.value / 1000) * audio.duration
   })
+  $('#pbFav').addEventListener('click', () => {
+    const t = state.tracks[state.cur]
+    if (t) toggleFav(t); else alert('先播一首歌')
+  })
+  $('#pbAdd').addEventListener('click', (e) => {
+    const t = state.tracks[state.cur]
+    if (!t) { alert('先播一首歌'); return }
+    openAddMenu(t, e.currentTarget)
+  })
   $('#pbInfo').addEventListener('click', openLyrics)
   $('#pbLyrics').addEventListener('click', openLyrics)
   $('#pbFloat').addEventListener('contextmenu', (e) => {
@@ -666,5 +1084,6 @@ function bindGlobal() {
   } catch (e) {
     console.warn('扫描失败', e)
   }
+  renderSidebar()
   render()
 })()
