@@ -620,3 +620,17 @@ body {
 .imp-st.ok { color: #1a7f37; border-color: rgba(26, 127, 55, .4); }
 .imp-st.warn { color: var(--red); border-color: rgba(236, 65, 65, .4); }
 .imp-st.skip { color: var(--dim-2); }
+/* ---------------- 歌词延迟调节 ---------------- */
+.off-group { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
+.off-group button {
+  width: 24px; height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--text-2);
+  font-size: 13px;
+  cursor: pointer;
+  line-height: 1;
+}
+.off-group button:hover { border-color: var(--red); color: var(--red); }
+.off-group .chip { margin-left: 0; }
