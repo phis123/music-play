@@ -179,8 +179,34 @@ ipcMain.handle('lyrics:auto', async (_e, { title, artist, filePath }) => {
   }
 })
 
+ipcMain.handle('net:playlist', async (_e, id) => netapi.playlistSongs(id))
+ipcMain.handle('net:songDetail', async (_e, id) => netapi.songDetail(id))
+
 ipcMain.handle('net:preview', async (_e, trackId) => netapi.trackUrl(trackId))
 ipcMain.handle('net:download', async (_e, payload) => netapi.downloadVoice({ ...payload, dir: root }))
+
+
+// ---------- 收藏（复制到「我喜欢的音乐」文件夹） ----------
+const FAV_DIR_NAME = '我喜欢的音乐'
+ipcMain.handle('lib:fav', async (_e, { filePath, on }) => {
+  try {
+    const dir = path.join(root, FAV_DIR_NAME)
+    await fsp.mkdir(dir, { recursive: true })
+    const dst = path.join(dir, path.basename(filePath))
+    const srcLrc = filePath.replace(/\.[^.]+$/, '.lrc')
+    const dstLrc = dst.replace(/\.[^.]+$/, '.lrc')
+    if (on) {
+      if (!fs.existsSync(dst)) await fsp.copyFile(filePath, dst)
+      if (fs.existsSync(srcLrc) && !fs.existsSync(dstLrc)) await fsp.copyFile(srcLrc, dstLrc)
+      return { ok: true, file: dst }
+    }
+    if (fs.existsSync(dst)) await fsp.unlink(dst)
+    if (fs.existsSync(dstLrc)) await fsp.unlink(dstLrc)
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, reason: String(e.message || e) }
+  }
+})
 
 ipcMain.handle('app:info', () => ({
   version: app.getVersion(),
