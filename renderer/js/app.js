@@ -254,7 +254,8 @@ async function doDownload(idx) {
   render()
   try {
     const r = await window.api.downloadVoice({ voice: v, song: search.song || { name: v.title } })
-    search.downloading[v.voiceId] = '已保存'
+    const kb = r && r.br ? Math.round(r.br / 1000) : 0
+    search.downloading[v.voiceId] = kb ? `已保存 ${kb}k` : '已保存'
     try {
       const lib = await window.api.scan(state.root)
       state.tracks = lib.tracks
@@ -539,7 +540,7 @@ function trackRowHtml(t, idx, no) {
     <div class="track-row" data-i="${idx}">
       <div class="idx">${no != null ? no : idx + 1}</div>
       <div class="cov" data-rowcov="${idx}"></div>
-      <div class="tt">${esc(cleanTitle(t.title))}${t.hasLrc ? '<span class="badge">词</span>' : ''}</div>
+      <div class="tt">${esc(cleanTitle(t.title))}${t.hasLrc ? '<span class="badge">词</span>' : ''}${t.bitrate ? `<span class="badge kbps-badge">${t.bitrate}k</span>` : ''}</div>
       <div class="ar">${esc(t.artist || '未知艺人')}</div>
       <div class="du">${fmt(t.duration || 0)}</div>
       <div class="row-acts">
@@ -731,7 +732,7 @@ async function playTrack(t, i) {
 
   const title = cleanTitle(t.title)
   $('#pbTitle').textContent = title
-  $('#pbArtist').textContent = t.artist || '未知艺人'
+  $('#pbArtist').textContent = (t.artist || '未知艺人') + (t.bitrate ? ` · ${t.bitrate}k` : '')
   $('#lpTitle').textContent = title
   $('#lpArtist').textContent = t.artist || '未知艺人'
 
