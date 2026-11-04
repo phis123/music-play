@@ -536,3 +536,87 @@ body {
 .btn-ghost { color: var(--dim); font-size: 12.5px; padding: 4px 10px; border-radius: 6px; }
 .btn-ghost:hover { background: var(--hover); color: var(--red); }
 .result-title { font-size: 13.5px; font-weight: 600; }
+
+/* ---------------- 页头 / 行操作 ---------------- */
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 880px;
+  margin: 0 auto;
+}
+.page-actions { display: flex; gap: 8px; padding-bottom: 16px; }
+
+.track-row {
+  grid-template-columns: 34px 40px 1fr 180px 62px 64px;
+}
+.row-acts { display: flex; gap: 4px; justify-content: flex-end; }
+.act {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  color: var(--dim);
+  font-size: 14px;
+  line-height: 1;
+  background: none;
+  cursor: pointer;
+}
+.act:hover { background: var(--hover); color: var(--red); border-color: var(--line); }
+.act.on { color: var(--red); border-color: rgba(236, 65, 65, .45); background: var(--red-soft); }
+
+/* ---------------- 加入歌单菜单 ---------------- */
+.add-menu {
+  position: fixed;
+  z-index: 999;
+  min-width: 200px;
+  padding: 6px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid var(--line);
+  box-shadow: 0 12px 32px rgba(20, 20, 30, .16);
+}
+.am-title { font-size: 11.5px; color: var(--dim); padding: 6px 10px 4px; }
+.add-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-2);
+  cursor: pointer;
+  text-align: left;
+}
+.add-menu button:hover { background: var(--hover); color: var(--red); }
+.am-n { color: var(--dim-2); font-size: 11.5px; }
+.am-new { color: var(--red) !important; }
+
+.pl-name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.pl-n { color: var(--dim-2); font-size: 11px; }
+
+/* ---------------- 批量导入 ---------------- */
+.imp-bar { max-width: 880px; margin: 0 auto 12px; display: flex; gap: 8px; }
+.imp-bar input {
+  flex: 1; padding: 9px 14px; border-radius: var(--r-md);
+  border: 1px solid var(--line); background: var(--side);
+  font-size: 13px; outline: none; color: var(--text);
+}
+.imp-bar input:focus { border-color: var(--red); }
+.imp-list { max-width: 880px; margin: 0 auto; display: flex; flex-direction: column; gap: 2px; }
+.imp-row { display: flex; align-items: center; gap: 12px; padding: 9px 10px; border-radius: var(--r-md); }
+.imp-row:hover { background: var(--hover); }
+.imp-main { flex: 1; min-width: 0; }
+.imp-name { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.imp-artist { margin-left: 8px; color: var(--dim); font-size: 12px; }
+.imp-v { font-size: 12.5px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.imp-v.muted { color: var(--dim-2); }
+.imp-v-sub { margin-left: 8px; color: var(--dim-2); font-size: 11.5px; }
+.imp-right { display: flex; align-items: center; gap: 6px; flex: none; }
+.imp-st { font-size: 11.5px; color: var(--dim); padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); }
+.imp-st.ok { color: #1a7f37; border-color: rgba(26, 127, 55, .4); }
+.imp-st.warn { color: var(--red); border-color: rgba(236, 65, 65, .4); }
+.imp-st.skip { color: var(--dim-2); }
