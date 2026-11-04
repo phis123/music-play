@@ -12,6 +12,13 @@ const DEFAULT_ROOT = process.env.MUSIC_ROOT ||
 let win = null
 let root = DEFAULT_ROOT
 
+// ---------- 单实例锁：重复双击只聚焦已有窗口，不再起第二个 ----------
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+}
+
+
 // music-metadata v10+ 是纯 ESM，只能动态 import
 let _mm = null
 async function mmModule() {
@@ -392,4 +399,12 @@ app.whenReady().then(() => {
   netapi.ensureServer().catch((e) => console.warn('[ncm] 启动失败:', e.message))
 })
 app.on('will-quit', () => globalShortcut.unregisterAll())
+app.on('second-instance', () => {
+  if (win && !win.isDestroyed()) {
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+  }
+})
+
 app.on('window-all-closed', () => app.quit())
