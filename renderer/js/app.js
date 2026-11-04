@@ -478,8 +478,15 @@ function viewPlaylist(id) {
       <div class="row-acts"><button class="act" data-plrm="${i}" title="移出歌单">✕</button></div>
     </div>`
   }).join('')
-  return `<div class="page-title">${esc(pl.name)}</div>
-    <div class="page-sub">共 ${pl.tracks.length} 首</div>
+  return `<div class="page-head">
+      <div>
+        <div class="page-title">${esc(pl.name)}</div>
+        <div class="page-sub">共 ${pl.tracks.length} 首</div>
+      </div>
+      <div class="page-actions">
+        <button id="plDel" class="btn-sm">删除歌单</button>
+      </div>
+    </div>
     <div class="tracklist">${rows}</div>`
 }
 
@@ -510,6 +517,40 @@ async function rescan() {
     state.tracks = lib.tracks
     state.root = lib.root
   } catch { }
+}
+
+async function deleteTrack(t) {
+  if (!t || !t.path) return
+  if (!confirm(`删除《${cleanTitle(t.title)}》？\n文件会移到回收站（含歌词/封面）`)) return
+  const r = await window.api.remove(t.path)
+  if (!r || !r.ok) { alert('删除失败：' + ((r && r.reason) || '未知错误')); return }
+  // 清掉本地记录
+  const set = favSet(); set.delete(t.path)
+  localStorage.setItem(FAV_KEY, JSON.stringify([...set]))
+  const rec = getRecent().filter((x) => x.path !== t.path)
+  localStorage.setItem(RECENT_KEY, JSON.stringify(rec))
+  const pls = getPlaylists()
+  for (const p of pls) p.tracks = p.tracks.filter((x) => x.path !== t.path)
+  savePlaylists(pls)
+  if (state.cur >= 0 && state.tracks[state.cur] && state.tracks[state.cur].path === t.path) {
+    audio.pause()
+    audio.removeAttribute('src')
+    state.cur = -1
+  }
+  await rescan()
+  renderSidebar()
+  render()
+}
+
+async function deletePlaylist(id) {
+  const pl = getPlaylists().find((p) => p.id === id)
+  if (!pl) return
+  if (!confirm(`删除歌单「${pl.name}」？\n（只删歌单，不动音乐文件）`)) return
+  const v = getPlaylists().filter((p) => p.id !== id)
+  savePlaylists(v)
+  renderSidebar()
+  location.hash = '#/local'
+  render()
 }
 
 async function fixCovers() {
@@ -558,6 +599,7 @@ function trackRowHtml(t, idx, no) {
       <div class="row-acts">
         <button class="act${isFav(t.path) ? ' on' : ''}" data-fav="${idx}" title="喜欢">♥</button>
         <button class="act" data-pladd="${idx}" title="加入歌单">＋</button>
+        <button class="act del" data-del="${idx}" title="删除（移到回收站）"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9.5 7V4.8h5V7M6.2 7l.9 12.4a1 1 0 0 0 1 .9h7.8a1 1 0 0 0 1-.9L17.8 7"/><path d="M10.2 11v6M13.8 11v6"/></svg></button>
       </div>
     </div>`
 }
@@ -637,6 +679,13 @@ function bindRowActions() {
       if (t) toggleFav(t)
       return
     }
+    const delBtn = e.target.closest('[data-del]')
+    if (delBtn) {
+      e.stopPropagation()
+      const t = state.tracks[+delBtn.dataset.del]
+      if (t) deleteTrack(t)
+      return
+    }
     const add = e.target.closest('[data-pladd]')
     if (add) {
       e.stopPropagation()
@@ -679,6 +728,7 @@ function render() {
     $('#btnBackSongs')?.addEventListener('click', () => { search.song = null; search.voices = []; render() })
   }
   if (hash.startsWith('#/playlist/')) {
+    $('#plDel')?.addEventListener('click', () => deletePlaylist(hash.split('/').pop()))
     const pl = getPlaylists().find((p) => p.id === hash.split('/').pop())
     $$('.track-row').forEach((el) => el.addEventListener('click', () => playPath(el.dataset.path)))
     $$('[data-plcov]').forEach((el) => {
