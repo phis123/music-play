@@ -36,8 +36,7 @@
       </nav>
       <nav class="nav-group">
         <div class="group-label">歌单 <button id="btnNewPlaylist" title="新建歌单">＋</button></div>
-        <a class="nav-item" data-route="#/playlist/1"><span class="ico">▸</span><span>新建歌单</span></a>
-        <a class="nav-item" data-route="#/playlist/2"><span class="ico">▸</span><span>我的歌单</span></a>
+        <div id="plList"></div>
       </nav>
     </div>
   </aside>
@@ -100,6 +99,8 @@
   </div>
 
   <div class="pb-right">
+    <button id="pbFav" title="喜欢">♥</button>
+    <button id="pbAdd" title="加入歌单">＋</button>
     <button id="pbLyrics" title="歌词">词</button>
     <button id="pbFloat" title="悬浮歌词（桌面歌词）">浮</button>
     <button id="pbVol" title="音量">🔊</button>
