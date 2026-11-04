@@ -1038,6 +1038,8 @@ function bindGlobal() {
     if (on) setTimeout(pushFloat, 400)   // 等悬浮窗加载完再推
   })
   $('#lpBack').addEventListener('click', closeLyrics)
+  $('#offDown')?.addEventListener('click', () => nudgeOffset(-100))
+  $('#offUp')?.addEventListener('click', () => nudgeOffset(100))
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeLyrics()
     if (e.key === ' ' && document.activeElement.tagName !== 'INPUT') {
