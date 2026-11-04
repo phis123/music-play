@@ -159,6 +159,14 @@ async function searchVoices(keywords, limit = 30) {
 }
 
 /* ---------------- 试听 / 下载 ---------------- */
+async function trackInfo(trackId) {
+  await ensureServer()
+  const d = await get(`/song/url?${qs({ id: trackId })}`)
+  const arr = (d.data || d) || []
+  const first = Array.isArray(arr) ? arr[0] : null
+  return { url: (first && first.url) || '', br: (first && first.br) || 0, size: (first && first.size) || 0 }
+}
+
 async function trackUrl(trackId) {
   await ensureServer()
   const d = await get(`/song/url?${qs({ id: trackId })}`)
@@ -253,7 +261,8 @@ async function downloadVoice({ voice, song, dir }) {
   const target = dir || path.join(app.getPath('music'), 'music-play')
   await fsp.mkdir(target, { recursive: true })
 
-  const url = await trackUrl(voice.mainTrackId)
+  const info = await trackInfo(voice.mainTrackId)
+  const url = info.url
   if (!url) throw new Error('拿不到音频地址（可能是 VIP 限制）')
 
   const base = sanitize(song && song.name ? song.name : voice.title || 'voice')
@@ -294,7 +303,7 @@ async function downloadVoice({ voice, song, dir }) {
     }
   } catch { /* 歌词失败不影响下载 */ }
 
-  return { file, lrcFile, dir: target }
+  return { file, lrcFile, dir: target, br: info.br, size: info.size }
 }
 
 /* ---------------- 自动补词 ---------------- */
@@ -445,6 +454,7 @@ module.exports = {
   playlistSongs,
   songDetail,
   trackUrl,
+  trackInfo,
   lyric,
   downloadVoice,
   getPort: () => ncmPort,
