@@ -167,15 +167,64 @@ async function trackUrl(trackId) {
   return (first && first.url) || ''
 }
 
+
+/* ---------------- 双语歌词合并 ---------------- */
+function parseTime(line) {
+  const m = line.match(/^\s*\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]/)
+  if (!m) return null
+  return (+m[1]) * 60000 + (+m[2]) * 1000 + (m[3] ? +m[3].padEnd(2, '0').slice(0, 2) * 10 : 0)
+}
+
+/** 把翻译按时间戳并进原文：同一时间戳输出「原文行 + 翻译行」 */
+function mergeLrc(main, trans) {
+  const tmap = new Map()
+  for (const line of String(trans || '').split(/\r?\n/)) {
+    const t = parseTime(line)
+    if (t == null) continue
+    const body = line.replace(/^\s*\[[^\]]*\]\s*/, '').trim()
+    if (body) tmap.set(t, body)
+  }
+  if (!tmap.size) return String(main || '')
+  const out = []
+  for (const line of String(main || '').split(/\r?\n/)) {
+    if (!line.trim()) continue
+    const t = parseTime(line)
+    if (t == null) { out.push(line); continue }
+    const tag = line.match(/^\s*(\[[^\]]*\])/)[1]
+    const body = line.replace(/^\s*\[[^\]]*\]\s*/, '').trim()
+    if (!body) { out.push(line); continue }
+    out.push(`${tag}${body}`)
+    const tr = tmap.get(t)
+    if (tr && tr !== body) out.push(`${tag}${tr}`)
+  }
+  return out.join('\n')
+}
+
 async function lyric(songId) {
   await ensureServer()
   const d = await get(`/lyric?${qs({ id: songId })}`)
-  const lrc = ((d.data || d).lrc || {}).lyric || ''
-  return lrc
+  const bag = d.data || d
+  const main = (bag.lrc || {}).lyric || ''
+  const trans = (bag.tlyric || {}).lyric || ''
+  return mergeLrc(main, trans)
 }
 
 function sanitize(name) {
   return String(name).replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 80)
+}
+
+async function fetchBuffer(url) {
+  return new Promise((resolve, reject) => {
+    const mod = url.startsWith('https') ? https : http
+    const req = mod.get(url, { timeout: 30000 }, (res) => {
+      if (res.statusCode !== 200) return reject(new Error('HTTP ' + res.statusCode))
+      const chunks = []
+      res.on('data', (c) => chunks.push(c))
+      res.on('end', () => resolve(Buffer.concat(chunks)))
+    })
+    req.on('timeout', () => req.destroy(new Error('超时')))
+    req.on('error', reject)
+  })
 }
 
 function downloadTo(url, filePath, onProgress) {
@@ -214,7 +263,28 @@ async function downloadVoice({ voice, song, dir }) {
 
   await downloadTo(url, file)
 
-  // 同步歌词
+  // 写标签：标题 / 作者 / 封面（用歌曲的）
+  try {
+    const NodeID3 = require('node-id3')
+    const tags = {}
+    if (song && song.name) tags.title = song.name
+    const ar = song && song.artist ? String(song.artist).split('/')[0].trim() : ''
+    if (ar) tags.artist = ar
+    if (song && song.album) tags.album = song.album
+    let imgBuf = null
+    const coverUrl = (song && song.cover) || voice.cover || ''
+    if (coverUrl) {
+      try { imgBuf = await fetchBuffer(coverUrl) } catch { imgBuf = null }
+    }
+    if (imgBuf && imgBuf.length) {
+      tags.image = { mime: 'image/jpeg', type: { id: 3, name: 'front cover' }, description: 'cover', imageBuffer: imgBuf }
+    }
+    if (Object.keys(tags).length) NodeID3.write(tags, file)
+  } catch (e) {
+    log('写标签失败: ' + (e && e.message))
+  }
+
+  // 同步歌词（含翻译）
   let lrcFile = ''
   try {
     const text = song && song.id ? await lyric(song.id) : ''
