@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('api', {
   playlist: (id) => ipcRenderer.invoke('net:playlist', id),
   songDetail: (id) => ipcRenderer.invoke('net:songDetail', id),
   downloadVoice: (payload) => ipcRenderer.invoke('net:download', payload),
+  replaceSource: (payload) => ipcRenderer.invoke('net:replaceSource', payload),
   winMin: () => ipcRenderer.send('win:minimize'),
   winMax: () => ipcRenderer.send('win:toggle-max'),
   winClose: () => ipcRenderer.send('win:close'),

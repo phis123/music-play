@@ -97,22 +97,27 @@ function normSong(s) {
     duration: Math.round((s.dt || s.duration || 0) / 1000),
     cover: al.picUrl || al.blurPicUrl || '',
     fee: s.fee == null ? 0 : s.fee,
+    alias: [].concat(s.alia || [], s.tns || [], s.alias || []).filter((v, i, a) => v && a.indexOf(v) === i),
   }
 }
 
 function normVoice(r) {
   const bi = r.baseInfo || {}
+  const ms = bi.mainSong || {}
   const ui = r.uiElement || {}
   const radio = bi.radio || {}
+  const dj = bi.dj || (radio && radio.dj) || {}
+  const rawTitle = (ui.mainTitle && ui.mainTitle.title) || ms.name || bi.name || ''
   return {
     cover: thumb(bi.coverUrl || (radio && radio.picUrl) || (ui.image && ui.image.imageUrl) || ''),
-    voiceId: r.resourceId,
-    title: (ui.mainTitle && ui.mainTitle.title) || '',
-    sub: ui.subTitle || '',
+    voiceId: r.resourceId || bi.id || ms.id,
+    title: String(rawTitle).replace(/^声音[:：]?\s*/, '').trim(),
+    sub: (ui.subTitle && ui.subTitle.title) || ui.subTitle || '',
     radio: radio.name || '',
-    duration: Math.round((bi.duration || 0) / 1000),
+    dj: dj.nickname || '',
+    duration: Math.round((bi.duration || ms.duration || 0) / 1000),
     plays: bi.listenerCount || bi.adjustedPlayCount || 0,
-    mainTrackId: bi.mainTrackId || 0,
+    mainTrackId: bi.mainTrackId || ms.id || 0,
   }
 }
 
@@ -277,21 +282,31 @@ function downloadTo(url, filePath, onProgress) {
   })
 }
 
-async function downloadVoice({ voice, song, dir }) {
+async function downloadVoice({ voice, song, dir, overwritePath }) {
   await ensureServer()
-  const target = dir || path.join(app.getPath('music'), 'music-play')
+  const target = overwritePath ? path.dirname(overwritePath) : (dir || path.join(app.getPath('music'), 'music-play'))
   await fsp.mkdir(target, { recursive: true })
 
   const info = await trackInfo(voice.mainTrackId)
   const url = info.url
   if (!url) throw new Error('拿不到音频地址（可能是 VIP 限制）')
 
-  const base = sanitize(song && song.name ? song.name : voice.title || 'voice')
-  let file = path.join(target, `${base}.mp3`)
-  let n = 1
-  while (fs.existsSync(file)) { file = path.join(target, `${base} (${n++}).mp3`) }
+  let file = overwritePath
+  if (!file) {
+    const base = sanitize(song && song.name ? song.name : voice.title || 'voice')
+    file = path.join(target, `${base}.mp3`)
+    let n = 1
+    while (fs.existsSync(file)) { file = path.join(target, `${base} (${n++}).mp3`) }
+  }
 
-  await downloadTo(url, file)
+  const tmpFile = file + '.downloading'
+  await downloadTo(url, tmpFile)
+  try {
+    await fsp.rename(tmpFile, file)
+  } catch {
+    await fsp.copyFile(tmpFile, file)
+    try { await fsp.unlink(tmpFile) } catch { }
+  }
 
   // 写标签：标题 / 作者 / 封面（用歌曲的）
   try {
@@ -358,96 +373,188 @@ async function autoLyric({ title, artist }) {
 }
 
 
-/* ---------------- 声音搜索：多查询兜底 ---------------- */
+/* ---------------- 声音搜索：多查询兜底与智能评分 ---------------- */
 function firstArtist(a) {
-  return String(a || '').split(/[\/、,&]|feat\.?\s*/i).map((x) => x.trim()).filter(Boolean)[0] || ''
+  const raw = String(a || '').split(/[\/、,&]|feat\.?\s*/i).map((x) => x.trim()).filter(Boolean)[0] || ''
+  // 去掉歌手后面的括号别名（如 "void (Mournfinale)" -> "void"），避免括号拖累搜索
+  const stripped = raw.replace(/\s*[（(【\[].*?[）)】\]]\s*/g, ' ').trim()
+  return stripped || raw
 }
+
+function unwrapQuotes(n) {
+  return String(n || '').replace(/^[『「《【]+|[』」》】]+$/g, '').replace(/\s+/g, ' ').trim()
+}
+
 function looseName(n) {
-  return String(n || '').replace(/[（(【\[].*?[）)】\]]/g, '').replace(/\s+/g, ' ').trim()
+  const raw = unwrapQuotes(n)
+  // 仅剥离有空格分隔或位于末尾的括号附加说明（如 "(feat. Salita)"、"(vivid/stasis edit)"），保留词内括号如 "AI[UE]OON"
+  const stripped = raw
+    .replace(/\s+[（(【\[][^）)】\]]*[）)】\]]/g, '')
+    .replace(/^[（(【\[][^）)】\]]*[）)】\]]\s+/g, '')
+    .replace(/[（(][^）)]*(?:feat\.?|ver\.?|version|edit|mix|ost|op|ed|inst|off\s*vocal)[^）)]*[）)]/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return stripped.length >= 2 ? stripped : raw
 }
-function normKey(s) {
-  return String(s || '').toLowerCase().replace(/[\s\-_「」『』【】\[\]（）()]/g, '')
+
+function normKeyRaw(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/^声音[:：]?\s*/, '')
+    .replace(/^\d{1,3}\s*[-._、)\]]\s*/, '')
+    .replace(/^\d{2}\s+(?=[a-z\u4e00-\u9fa5])/i, '')
+    .replace(/[\s\-_—–·・.,，。:：;；!！?？'"“”‘’\/\\|~`+*#@&^%$=<>{}「」『』【】\[\]（）()]/g, '')
+}
+
+function normKeyLoose(s) {
+  const stripped = String(s || '')
+    .replace(/^声音[:：]?\s*/, '')
+    .replace(/^\d{1,3}\s*[-._、)\]]\s*/, '')
+    .replace(/^\d{2}\s+(?=[a-z\u4e00-\u9fa5])/i, '')
+    .replace(/\s+[（(【\[][^）)】\]]*[）)】\]]/g, ' ')
+    .replace(/^[（(【\[][^）)】\]]*[）)】\]]\s*/g, ' ')
+  const k = normKeyRaw(stripped)
+  return k.length >= 2 ? k : normKeyRaw(s)
+}
+
+function isVariantVoice(voiceTitle, songName) {
+  const vt = String(voiceTitle || '')
+  const sn = String(songName || '')
+  const re = /伴奏|纯音乐|inst(rumental)?\b|off\s*vocal|karaoke|钢琴版|吉他版|八音盒|铃声|片段|试听|[×x]\s*0\.\d+|0\.\d+\s*[×x]|slowed|nightcore|倍速/i
+  return re.test(vt) && !re.test(sn)
+}
+
+function scoreCandidate(v, rawName, cleanName, fa, duration) {
+  const vt = String(v.title || '').replace(/^声音[:：]?\s*/, '').trim()
+  const krSong = normKeyRaw(rawName)
+  const klSong = normKeyLoose(cleanName)
+  const krVoice = normKeyRaw(vt)
+  const klVoice = normKeyLoose(vt)
+  const kArtist = normKeyRaw(fa)
+
+  let tScore = 0
+  // 特殊符号歌名（如 "-" 或 "_"）
+  if (!krSong && rawName.trim()) {
+    const sym = rawName.trim()
+    if (vt.includes(sym) || vt.includes('_') || vt.includes('-')) {
+      tScore = (kArtist && krVoice.includes(kArtist)) ? 60 : 35
+    }
+  } else {
+    const pairs = [
+      [krSong, krVoice],
+      [klSong, klVoice],
+      [krSong, klVoice],
+      [klSong, krVoice],
+    ]
+    for (const [ks, kv] of pairs) {
+      if (!ks || !kv) continue
+      if (kv === ks) {
+        tScore = Math.max(tScore, 65)
+      } else if (kv.includes(ks)) {
+        tScore = Math.max(tScore, 50)
+      } else if (ks.includes(kv) && kv.length >= Math.max(3, Math.floor(ks.length * 0.5))) {
+        tScore = Math.max(tScore, 38)
+      }
+    }
+  }
+
+  if (kArtist && kArtist.length >= 2 && (krVoice.includes(kArtist) || normKeyRaw(v.dj || '').includes(kArtist) || normKeyRaw(v.radio || '').includes(kArtist))) {
+    tScore += 8
+  }
+
+  let dScore = 0
+  const vDur = +(v.duration || 0)
+  const sDur = +(duration || 0)
+  const gap = (sDur > 0 && vDur > 0) ? Math.abs(vDur - sDur) : null
+  if (gap != null) {
+    if (gap <= 2) dScore = 55
+    else if (gap <= 5) dScore = 44
+    else if (gap <= 10) dScore = 26
+    else if (gap <= 20) dScore = 8
+    else if (gap <= 30) dScore = -12
+    else dScore = -45
+  }
+
+  let penalty = 0
+  if (isVariantVoice(vt, rawName)) penalty = 35
+
+  const strong = (tScore >= 45) && !penalty && (gap == null || gap <= 6)
+  return {
+    total: tScore + dScore - penalty,
+    tScore,
+    gap: gap == null ? 9999 : gap,
+    strong,
+  }
 }
 
 /**
- * 依次尝试多种关键词，避免「歌名 + 多个歌手 + 斜杠」把搜索搞空。
- * 最多 2 次请求：先「歌名 首位歌手」，结果里没有像样的再退回「歌名」。
+ * 依次尝试多种关键词：
+ * 1) 「原歌名 精简首位歌手」
+ * 2) 「原歌名」（防止歌手名不匹配或只返回 ×0.75/片段版）
+ * 3) 「去括号后缀歌名 精简首位歌手」与「去括号后缀歌名」
+ * 4) 符号歌名（如 "-"）兜底搜歌手名
+ * 只有当已经找到「标题命中 + 时长误差 ≤ 6s + 非片段/变速版」的高置信结果时才提前结束请求。
  */
-async function searchVoicesSmart(name, artist, duration = 0, limit = 20) {
+async function searchVoicesSmart(name, artist, duration = 0, limit = 25) {
+  const raw = unwrapQuotes(name)
   const clean = looseName(name)
   const fa = firstArtist(artist)
-  const q1 = [clean, fa].filter(Boolean).join(' ')
+
   const queries = []
-  if (q1) queries.push(q1)
-  if (clean && clean !== q1) queries.push(clean)
+  const addQ = (q) => {
+    const s = String(q || '').replace(/\s+/g, ' ').trim()
+    if (s && !queries.includes(s)) queries.push(s)
+  }
+
+  if (raw && normKeyRaw(raw).length >= 1) {
+    if (fa) addQ(`${raw} ${fa}`)
+    addQ(raw)
+  }
+  if (clean && clean !== raw) {
+    if (fa) addQ(`${clean} ${fa}`)
+    addQ(clean)
+  }
+  if (!normKeyRaw(raw) && fa) {
+    addQ(`${raw} ${fa}`)
+    addQ(fa)
+  }
 
   const seen = new Set()
-  let out = []
+  const out = []
   for (const kw of queries) {
     let list = []
     try { list = await searchVoices(kw, limit) } catch { list = [] }
-    for (const v of list) if (!seen.has(v.voiceId)) { seen.add(v.voiceId); out.push(v) }
-    if (titleHits(out, clean).length) break     // 标题已经对得上，别再发请求
+    for (const v of list) {
+      const key = `${v.voiceId || ''}:${v.mainTrackId || ''}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        out.push(v)
+      }
+    }
+    // 只有当已经拿到「标题匹配 + 时长一致(≤6s) + 非变速/片段」的优质声源时才提前收工
+    const hasStrong = out.some((v) => scoreCandidate(v, raw, clean, fa, duration).strong)
+    if (hasStrong && out.length >= 4) break
   }
 
-  // ---- 第 3 层兜底：标题都对不上时，按时长接近度排 ----
-  if (!titleHits(out, clean).length && duration > 0 && !out.length) {
-    // 标题没命中且没有结果 → 用「歌名」再搜一次（可能是生僻写法）
-    try { out = await searchVoices(clean, limit) } catch { /* ignore */ }
-  }
-
-  return rankVoices(out, clean, duration)
-}
-
-function titleHits(list, clean) {
-  const key = normKey(clean)
-  if (!key) return []
-  return list.filter((v) => {
-    const t = normKey(String(v.title || '').replace(/^声音[:：]?\s*/, ''))
-    return t && (t === key || t.includes(key) || key.includes(t))
-  })
+  return rankVoices(out, raw, clean, fa, duration)
 }
 
 /**
- * 排序：标题命中 > 时长接近 > 播放量
- * duration 单位秒；给 0 表示不知道时长
+ * 排序：综合评分（标题命中 + 时长接近 + 歌手匹配 - 片段/倍速扣分）> 播放量
+ * 保留全部候选（不再丢弃低分项），方便用户在「换源」界面人工挑选
  */
-function rankVoices(list, clean, duration) {
-  const key = normKey(clean)
-  const tScore = (v) => {
-    const t = normKey(String(v.title || '').replace(/^声音[:：]?\s*/, ''))
-    if (!t || !key) return 0
-    if (t === key) return 3
-    if (t.includes(key)) return 2
-    if (key.includes(t)) return 1
-    return 0
-  }
-  list.forEach((v) => {
-    v._t = tScore(v)
-    v._d = duration > 0 ? Math.abs((v.duration || 0) - duration) : 9999
+function rankVoices(list, raw, clean, fa, duration) {
+  const scored = list.map((v) => {
+    const sc = scoreCandidate(v, raw, clean, fa, duration)
+    return { v, sc }
   })
-
-  const good = list.filter((v) => v._t > 0)
-  if (good.length) {
-    good.sort((a, b) => (b._t - a._t) || (b.plays - a.plays))
-    return good.map(strip)
-  }
-
-  // 没有标题命中 → 按时长接近度
-  if (duration > 0) {
-    const tol = Math.max(5, Math.round(duration * 0.06))   // ±5s 或 ±6%
-    let pool = list.filter((v) => v._d <= tol)
-    if (!pool.length) pool = list.filter((v) => v._d <= 60)
-    const use = pool.length ? pool : list
-    use.sort((a, b) => (a._d - b._d) || (b.plays - a.plays))
-    return use.map(strip)
-  }
-
-  list.sort((a, b) => b.plays - a.plays)
-  return list.map(strip)
+  scored.sort((a, b) => {
+    if (b.sc.total !== a.sc.total) return b.sc.total - a.sc.total
+    if (a.sc.gap !== b.sc.gap) return a.sc.gap - b.sc.gap
+    return (b.v.plays || 0) - (a.v.plays || 0)
+  })
+  return scored.map((x) => x.v)
 }
-
-function strip(v) { delete v._t; delete v._d; return v }
 /* ---------------- 歌单曲目 ---------------- */
 async function playlistSongs(id) {
   await ensureServer()

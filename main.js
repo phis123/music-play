@@ -1,9 +1,36 @@
 // music-play · 主进程
 const { app, BrowserWindow, ipcMain, dialog, screen, globalShortcut, Tray, Menu, nativeImage, shell } = require('electron')
-const netapi = require('./netapi')
 const path = require('path')
 const fs = require('fs')
 const fsp = fs.promises
+
+// 兼容受管目录 / 低完整性级别启动：若默认 %APPDATA%\music-play 不可写，自动回退到程序旁 userdata 目录
+app.commandLine.appendSwitch('no-sandbox')
+app.commandLine.appendSwitch('disable-gpu-sandbox')
+;(function ensureWritablePaths() {
+  try {
+    const defDir = app.getPath('userData')
+    fs.mkdirSync(defDir, { recursive: true })
+    const probe = path.join(defDir, '._wprobe')
+    fs.writeFileSync(probe, '1')
+    fs.unlinkSync(probe)
+  } catch {
+    try {
+      const baseDir = path.join(path.dirname(process.execPath), 'userdata')
+      const sessDir = path.join(baseDir, 'session')
+      const tmpDir = path.join(baseDir, 'temp')
+      fs.mkdirSync(sessDir, { recursive: true })
+      fs.mkdirSync(tmpDir, { recursive: true })
+      app.setPath('userData', baseDir)
+      app.setPath('sessionData', sessDir)
+      app.setPath('temp', tmpDir)
+      process.env.TEMP = tmpDir
+      process.env.TMP = tmpDir
+    } catch { }
+  }
+})()
+
+const netapi = require('./netapi')
 
 const AUDIO_EXT = new Set(['.mp3', '.flac', '.wav', '.ogg', '.m4a', '.aac', '.opus'])
 const DEFAULT_ROOT = process.env.MUSIC_ROOT ||
@@ -11,6 +38,31 @@ const DEFAULT_ROOT = process.env.MUSIC_ROOT ||
 
 let win = null
 let root = DEFAULT_ROOT
+
+function cfgPath() {
+  return path.join(app.getPath('userData'), 'user-config.json')
+}
+function loadUserConfig() {
+  try {
+    const f = cfgPath()
+    if (fs.existsSync(f)) {
+      const cfg = JSON.parse(fs.readFileSync(f, 'utf8'))
+      if (cfg && cfg.root && fs.existsSync(cfg.root)) {
+        root = cfg.root
+        return cfg
+      }
+    }
+  } catch { }
+  return {}
+}
+function saveUserConfig(patch) {
+  try {
+    const cur = loadUserConfig()
+    const next = { ...cur, ...patch }
+    fs.mkdirSync(path.dirname(cfgPath()), { recursive: true })
+    fs.writeFileSync(cfgPath(), JSON.stringify(next, null, 2), 'utf8')
+  } catch { }
+}
 
 // ---------- 单实例锁：重复双击只聚焦已有窗口，不再起第二个 ----------
 const gotLock = app.requestSingleInstanceLock()
@@ -74,8 +126,10 @@ function parseLrc(text) {
 }
 
 ipcMain.handle('library:scan', async (_e, dir) => {
+  if (!dir) loadUserConfig()
   const target = dir || root
   root = target
+  if (dir) saveUserConfig({ root: target })
   const files = []
   await walk(target, files)
   const mm = await mmModule().catch(() => null)
@@ -201,6 +255,16 @@ ipcMain.handle('net:songDetail', async (_e, id) => netapi.songDetail(id))
 
 ipcMain.handle('net:preview', async (_e, trackId) => netapi.trackUrl(trackId))
 ipcMain.handle('net:download', async (_e, payload) => netapi.downloadVoice({ ...payload, dir: root }))
+ipcMain.handle('net:replaceSource', async (_e, payload) => {
+  const res = await netapi.downloadVoice({
+    voice: payload.voice,
+    song: payload.song,
+    overwritePath: payload.targetPath,
+    dir: root,
+  })
+  if (payload.targetPath) coverCache.delete(payload.targetPath)
+  return res
+})
 
 
 // ---------- 收藏（复制到「我喜欢的音乐」文件夹） ----------
@@ -226,18 +290,27 @@ ipcMain.handle('lib:fav', async (_e, { filePath, on }) => {
 })
 
 ipcMain.handle('lib:coverFix', async (_e, tracks) => {
-  const list = Array.isArray(tracks) ? tracks.slice(0, 40) : []
-  let done = 0
+  const list = Array.isArray(tracks) ? tracks.slice(0, 60) : []
+  let done = 0, skipped = 0
+  const errors = []
   for (const t of list) {
     const side = String(t.path).replace(/\.[^.]+$/, '') + '.jpg'
-    if (fs.existsSync(side)) continue
+    if (fs.existsSync(side)) { skipped++; continue }
     try {
       const buf = await netapi.coverBuffer({ name: t.title, artist: t.artist, cover: t.cover })
-      if (buf && buf.length) { fs.writeFileSync(side, buf); done++ }
-    } catch { }
+      if (buf && buf.length) {
+        fs.writeFileSync(side, buf)
+        coverCache.delete(t.path)
+        done++
+      } else {
+        errors.push({ name: t.title || t.path, reason: '未在网易云搜到匹配的高清封面' })
+      }
+    } catch (e) {
+      errors.push({ name: t.title || t.path, reason: String(e.message || e) })
+    }
   }
   coverCache.clear()
-  return { done, total: list.length }
+  return { done, skipped, total: list.length, errors }
 })
 
 ipcMain.handle('lib:delete', async (_e, filePath) => {
@@ -407,12 +480,14 @@ ipcMain.on('float:resize', (_e, h) => {
 })
 
 function createWindow() {
+  const iconPath = path.join(__dirname, 'assets', 'icon.ico')
   win = new BrowserWindow({
     width: 1200, height: 780,
     minWidth: 960, minHeight: 620,
     frame: false,
     backgroundColor: '#ffffff',
     show: false,
+    icon: fs.existsSync(iconPath) ? iconPath : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

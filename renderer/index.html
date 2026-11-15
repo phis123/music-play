@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
 <title>music-play</title>
 <link rel="stylesheet" href="css/tokens.css">
 <link rel="stylesheet" href="css/app.css">
@@ -33,45 +34,63 @@
         <a class="nav-item" data-route="#/liked"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7.2-4.4-7.2-9.4A4.2 4.2 0 0 1 12 7.6a4.2 4.2 0 0 1 7.2 3C19.2 15.6 12 20 12 20z"/></svg></span><span>我喜欢的音乐</span></a>
         <a class="nav-item" data-route="#/recent"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 7.6V12l3 1.8"/></svg></span><span>最近播放</span></a>
         <a class="nav-item" data-route="#/local"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="2.2"/><path d="M7.5 5v5.5h9V5"/><path d="M7.5 14.5h9"/></svg></span><span>本地音乐</span></a>
+        <a class="nav-item" data-route="#/import"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10"/><path d="M8 10l4 4 4-4"/><path d="M5 18h14"/></svg></span><span>批量导入</span></a>
+        <a class="nav-item" data-route="#/health"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg></span><span>曲库体检</span></a>
       </nav>
       <nav class="nav-group">
         <div class="group-label">歌单 <button id="btnNewPlaylist" title="新建歌单">＋</button></div>
         <div id="plList"></div>
       </nav>
     </div>
+    <div class="side-foot">
+      <button id="btnTheme" class="side-theme-btn" title="切换外观主题（浅色 / 深色 / 跟随系统）">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2"/></svg>
+        <span id="themeLabel">外观：跟随系统</span>
+      </button>
+    </div>
   </aside>
 
-  <main id="content"><div id="view"></div></main>
+  <main id="content">
+    <div id="taskBanner" class="task-banner hidden"></div>
+    <div id="view"></div>
+  </main>
 
   <!-- 歌词独立页 -->
   <section id="lyricsPage" class="overlay hidden">
+    <div class="lp-ambient" id="lpAmbient"></div>
     <div class="lp-head">
       <button id="lpBack" title="返回（Esc）">←</button>
-      <span class="lp-head-title">歌词</span>
+      <span class="lp-head-title" id="lpHeadSub">正在播放</span>
       <span class="off-group">
         <button id="offDown" title="歌词提前 0.1 秒（快捷键 [）">−</button>
-        <span id="lpOff" class="chip" title="歌词延迟偏移">偏移 0.0s</span>
+        <span id="lpOff" class="chip" title="点击重置歌词偏移为 0.0s">偏移 0.0s</span>
         <button id="offUp" title="歌词延后 0.1 秒（快捷键 ]）">＋</button>
       </span>
+      <button id="lpSwitchSource" class="lp-src-btn" title="更换当前歌曲声源（试听并替换音频文件）">⇄ 更换声源</button>
       <span id="lpSrc" class="chip">—</span>
     </div>
     <div class="lp-body">
       <div class="lp-left">
-        <div class="lp-cover" id="lpCover"></div>
+        <div class="lp-disc"><div class="lp-cover" id="lpCover"></div></div>
         <div class="lp-title" id="lpTitle">—</div>
         <div class="lp-artist" id="lpArtist">—</div>
+        <div class="lp-actions">
+          <button id="lpFav" class="lp-act-btn" title="喜欢">♥ 喜欢</button>
+          <button id="lpSourceBtn" class="lp-act-btn pri" title="搜索并替换当前歌曲声源">⇄ 换声源</button>
+          <button id="lpAddPl" class="lp-act-btn" title="加入歌单">＋ 加歌单</button>
+        </div>
       </div>
       <div class="lp-right">
         <div id="lpLyrics"></div>
-        <div id="lpEmpty" class="empty-note hidden">没有歌词</div>
-        <button id="lpResume" class="hidden" title="回到正在播放的歌词">回到当前</button>
+        <div id="lpEmpty" class="empty-note hidden">没有歌词 · 可点左侧「换声源」或等待自动补词</div>
+        <button id="lpResume" class="hidden" title="回到正在播放的歌词">回到当前句</button>
       </div>
     </div>
   </section>
 </div>
 
 <footer id="playerbar">
-  <div class="pb-left" id="pbInfo" title="点击查看歌词">
+  <div class="pb-left" id="pbInfo" title="点击展开歌词与唱片页">
     <div class="pb-cover" id="pbCover"></div>
     <div class="pb-meta">
       <div class="pb-title" id="pbTitle">未在播放</div>
@@ -81,18 +100,29 @@
 
   <div class="pb-center">
     <div class="pb-controls">
-      <button id="pbPrev" title="上一首" aria-label="上一首">
+      <button id="pbMode" class="mode-btn" title="播放模式：顺序循环" aria-label="播放模式">
+        <svg id="pbModeIcon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M17 2l4 4-4 4V7H7a3 3 0 0 0-3 3v2H2v-2a5 5 0 0 1 5-5h10V2zM7 22l-4-4 4-4v3h10a3 3 0 0 0 3-3v-2h2v2a5 5 0 0 1-5 5H7v3z"/>
+        </svg>
+      </button>
+      <button id="pbPrev" title="上一首 (Ctrl+←)" aria-label="上一首">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect x="5" y="5.5" width="2.6" height="13" rx="1.3"/>
           <path d="M19 5.9v12.2a.9.9 0 0 1-1.4.75L8.6 12.75a.9.9 0 0 1 0-1.5l9-6.1A.9.9 0 0 1 19 5.9z"/>
         </svg>
       </button>
-      <button id="pbPlay" class="primary" title="播放/暂停" aria-label="播放/暂停"></button>
-      <button id="pbNext" title="下一首" aria-label="下一首">
+      <button id="pbPlay" class="primary" title="播放/暂停 (Space)" aria-label="播放/暂停"></button>
+      <button id="pbNext" title="下一首 (Ctrl+→)" aria-label="下一首">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect x="16.4" y="5.5" width="2.6" height="13" rx="1.3"/>
           <path d="M5 5.9v12.2a.9.9 0 0 0 1.4.75l9-6.1a.9.9 0 0 0 0-1.5l-9-6.1A.9.9 0 0 0 5 5.9z"/>
         </svg>
+      </button>
+      <button id="pbQueue" class="queue-btn" title="当前播放队列" aria-label="播放队列">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2zm13 0l4 2.5-4 2.5v-5z"/>
+        </svg>
+        <span id="pbQueueCount" class="pb-q-badge"></span>
       </button>
     </div>
     <div class="pb-progress">
@@ -103,11 +133,18 @@
   </div>
 
   <div class="pb-right">
+    <button id="pbSource" class="pb-src-btn" title="更换当前歌曲声源">换源</button>
     <button id="pbFav" title="喜欢">♥</button>
     <button id="pbAdd" title="加入歌单">＋</button>
-    <button id="pbLyrics" title="歌词">词</button>
+    <button id="pbLyrics" title="展开歌词页">词</button>
     <button id="pbFloat" title="悬浮歌词（桌面歌词）">浮</button>
-    <button id="pbVol" title="音量">🔊</button>
+    <div class="vol-wrap" id="volWrap">
+      <button id="pbVol" title="音量（滚轮调节 / 点击静音）">🔊</button>
+      <div class="vol-pop hidden" id="volPop">
+        <input id="volRange" type="range" min="0" max="100" value="100">
+        <span id="volPct">100%</span>
+      </div>
+    </div>
     <span id="pbVer" class="dim"></span>
   </div>
 
@@ -115,6 +152,21 @@
   <audio id="previewAudio" preload="none"></audio>
 </footer>
 
+<!-- 播放队列抽屉 & 更换声源弹窗 -->
+<dialog id="sheetDlg" class="sheet-dlg"></dialog>
+
+<!-- 通用对话框：Electron 不支持 window.prompt，这里自己实现（Chromium 126 支持 @starting-style / allow-discrete） -->
+<dialog id="askDlg" class="ask-dlg" aria-labelledby="askTitle">
+  <form method="dialog" class="ask-panel">
+    <div class="ask-title" id="askTitle"></div>
+    <div class="ask-msg"></div>
+    <input class="ask-input" type="text" autocomplete="off" spellcheck="false">
+    <div class="ask-acts">
+      <button class="ask-btn ghost" value="cancel">取消</button>
+      <button class="ask-btn" value="ok">确定</button>
+    </div>
+  </form>
+</dialog>
 <script src="js/app.js"></script>
 </body>
 </html>

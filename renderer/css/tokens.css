@@ -35,10 +35,41 @@
   --titlebar-h: 38px;
   --sidebar-w: 240px;
   --player-h: 72px;
+  --ambient-rgb: 236, 65, 65;
 
   --r-sm: 6px;
   --r-md: 8px;
   --r-lg: 12px;
 
   color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --red: #ff5252;
+  --red-hover: #ff6b6b;
+  --red-soft: rgba(255, 82, 82, 0.16);
+
+  --bg: #111116;
+  --side: #181820;
+  --panel: #1a1a23;
+  --hover: #242430;
+  --active: rgba(255, 82, 82, 0.16);
+
+  --line: #2a2a38;
+  --line-soft: #22222e;
+
+  --text: #f3f3f8;
+  --text-2: #c6c6d4;
+  --dim: #8b8b9c;
+  --dim-2: #646475;
+
+  --cover-a: #262633;
+  --cover-b: #1c1c26;
+
+  --ly-en: #9498a6;
+  --ly-zh: #cfd2dc;
+  --ly-en-cur: #ff5252;
+  --ly-zh-cur: #ffffff;
+
+  color-scheme: dark;
 }

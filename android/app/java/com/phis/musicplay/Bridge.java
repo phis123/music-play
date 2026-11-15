@@ -1,0 +1,631 @@
+package com.phis.musicplay;
+
+import android.app.Activity;
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.webkit.JavascriptInterface;
+import android.webkit.WebView;
+import android.widget.Toast;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStreamReader;
+import java.util.ArrayList;
+import java.util.List;
+
+/** JS <-> 原生 桥 */
+public class Bridge {
+
+    private final Activity act;
+    private final WebView web;
+    private final PlayerBridge player;
+    private final SharedPreferences sp;
+    private final android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+
+    public Bridge(Activity act, WebView web, PlayerBridge player) {
+        this.act = act;
+        this.web = web;
+        this.player = player;
+        this.sp = act.getSharedPreferences("musicplay", Context.MODE_PRIVATE);
+        PlaybackService.setListener(new PlaybackService.Listener() {
+            @Override public void onState(final boolean playing, final int posSec, final int durSec) {
+                mainHandler.post(() -> {
+                    if (web == null) return;
+                    web.evaluateJavascript("window.onTick&&window.onTick(" + posSec + ")", null);
+                    if (playing) {
+                        web.evaluateJavascript("window.onPlaying&&window.onPlaying(" + durSec + ")", null);
+                    }
+                });
+            }
+            @Override public void onComplete() {
+                mainHandler.post(() -> {
+                    if (web != null) web.evaluateJavascript("window.onEnded&&window.onEnded()", null);
+                });
+            }
+        });
+    }
+
+    // ---------------- 曲库 ----------------
+    @JavascriptInterface
+    public String listAudio() {
+        return AudioStore.listJson(act);
+    }
+
+    /** 读取歌词等文本文件（UTF-8 / BOM 兼容） */
+    @JavascriptInterface
+    public String readText(String path) {
+        try {
+            File f = new File(path);
+            if (!f.exists()) return null;
+            BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(f), "UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            boolean first = true;
+            while ((line = r.readLine()) != null) {
+                if (first) {
+                    first = false;
+                    if (line.startsWith("\uFEFF")) line = line.substring(1);
+                }
+                sb.append(line).append('\n');
+            }
+            r.close();
+            return sb.toString();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    @JavascriptInterface
+    public boolean lrcExists(String audioPath) {
+        try {
+            return new File(audioPath.replaceAll("\\.[^.]+$", "") + ".lrc").exists();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** 内嵌封面 → data URL（带缓存） */
+    private final java.util.HashMap<String, String> coverCache = new java.util.HashMap<>();
+
+    @JavascriptInterface
+    public String cover(String path) {
+        if (path == null) return "";
+        if (coverCache.containsKey(path)) return coverCache.get(path);
+        String out = "";
+        android.media.MediaMetadataRetriever mmr = new android.media.MediaMetadataRetriever();
+        try {
+            mmr.setDataSource(path);
+            byte[] pic = mmr.getEmbeddedPicture();
+            if (pic != null && pic.length > 0) {
+                out = "data:image/jpeg;base64," + android.util.Base64.encodeToString(pic, android.util.Base64.NO_WRAP);
+            }
+        } catch (Exception ignored) {
+        } finally {
+            try { mmr.release(); } catch (Exception ignored) { }
+        }
+        coverCache.put(path, out);
+        return out;
+    }
+
+    // ---------------- 播放（走前台 Service） ----------------
+    private PlaybackService svc() {
+        if (PlaybackService.instance == null) PlaybackService.start(act);
+        return PlaybackService.instance;
+    }
+
+    @JavascriptInterface
+    public void playEx(String path, String title, String artist, String cover) {
+        PlaybackService.play(act, path, title, artist, path, cover);
+    }
+
+    @JavascriptInterface
+    public void playEx(String path, String title, String artist) {
+        playEx(path, title, artist, null);
+    }
+
+    /** 在线试听（不落盘） */
+    @JavascriptInterface
+    public void preview(String url, String title) { preview(url, title, null); }
+
+    @JavascriptInterface
+    public void preview(String url, String title, String cover) {
+        PlaybackService.play(act, url, title == null ? "试听" : title, "在线试听", "", cover);
+    }
+
+    /** 重新扫描曲库目录（媒体库漏扫时兜底） */
+    @JavascriptInterface
+    public int rescan() {
+        try { return AudioStore.rescan(act); } catch (Exception e) { return 0; }
+    }
+
+    @JavascriptInterface public void play(String path) { playEx(path, "", ""); }
+    @JavascriptInterface public void pause() { PlaybackService s = svc(); if (s != null) s.pause(); }
+    @JavascriptInterface public void resume() { PlaybackService s = svc(); if (s != null) s.resume(); }
+    @JavascriptInterface public void toggle() { PlaybackService s = svc(); if (s != null) s.toggle(); }
+    @JavascriptInterface public void stop() { PlaybackService s = svc(); if (s != null) s.pause(); }
+    @JavascriptInterface public void seek(int ms) { PlaybackService s = svc(); if (s != null) s.seek(ms); }
+    @JavascriptInterface public int position() { PlaybackService s = svc(); return s != null ? s.positionSec() : 0; }
+    @JavascriptInterface public boolean isPlaying() { PlaybackService s = svc(); return s != null && s.isPlaying(); }
+
+    // ---------------- 我喜欢的音乐（存路径） ----------------
+    @JavascriptInterface
+    public String favList() {
+        return sp.getString("favs", "[]");
+    }
+
+    @JavascriptInterface
+    public void favSet(String json) {
+        sp.edit().putString("favs", json).apply();
+    }
+
+    // ---------------- 歌单 ----------------
+    @JavascriptInterface
+    public String playlists() {
+        return sp.getString("playlists", "[]");
+    }
+
+    @JavascriptInterface
+    public void savePlaylists(String json) {
+        sp.edit().putString("playlists", json).apply();
+    }
+
+    // ---------------- 杂项 ----------------
+    @JavascriptInterface
+    public void toast(String msg) {
+        act.runOnUiThread(() -> Toast.makeText(act, msg, Toast.LENGTH_SHORT).show());
+    }
+
+    // ---------------- 网络（weapi 用） ----------------
+    private static String readAll(java.io.InputStream is) throws java.io.IOException {
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
+        int n;
+        while ((n = is.read(buf)) > 0) bos.write(buf, 0, n);
+        return new String(bos.toByteArray(), "UTF-8");
+    }
+
+    private java.net.HttpURLConnection openConn(String url, String method) throws java.io.IOException {
+        java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+        c.setRequestMethod(method);
+        c.setConnectTimeout(15000);
+        c.setReadTimeout(30000);
+        c.setRequestProperty("User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36");
+        c.setRequestProperty("Referer", "https://music.163.com");
+        c.setRequestProperty("Accept", "*/*");
+        c.setInstanceFollowRedirects(true);
+        return c;
+    }
+
+    @JavascriptInterface
+    public String httpPost(String url, String body) {
+        try {
+            java.net.HttpURLConnection c = openConn(url, "POST");
+            c.setDoOutput(true);
+            c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+            byte[] data = body.getBytes("UTF-8");
+            c.setFixedLengthStreamingMode(data.length);
+            c.getOutputStream().write(data);
+            int code = c.getResponseCode();
+            java.io.InputStream is = code >= 400 ? c.getErrorStream() : c.getInputStream();
+            String txt = is == null ? "" : readAll(is);
+            c.disconnect();
+            return txt;
+        } catch (Exception e) {
+            return "{\"code\":-1,\"message\":\"" + String.valueOf(e.getMessage()).replace("\"", " ") + "\"}";
+        }
+    }
+
+    @JavascriptInterface
+    public String httpGet(String url) {
+        try {
+            java.net.HttpURLConnection c = openConn(url, "GET");
+            int code = c.getResponseCode();
+            java.io.InputStream is = code >= 400 ? c.getErrorStream() : c.getInputStream();
+            String txt = is == null ? "" : readAll(is);
+            c.disconnect();
+            return txt;
+        } catch (Exception e) {
+            return "{\"code\":-1}";
+        }
+    }
+
+    /** 同步下载到 Music 目录（保留兼容） */
+    @JavascriptInterface
+    public String download(String url, String fileName, String lrcText) {
+        try {
+            java.io.File dir = android.os.Environment.getExternalStoragePublicDirectory(
+                    android.os.Environment.DIRECTORY_MUSIC);
+            if (!dir.exists()) dir.mkdirs();
+            String safe = fileName.replaceAll("[\\\\/:*?\"<>|]", "_");
+            if (safe.length() > 100) {
+                int dot = safe.lastIndexOf('.');
+                safe = dot > 0 ? safe.substring(0, 96) + safe.substring(dot) : safe.substring(0, 100);
+            }
+            java.io.File out = new java.io.File(dir, safe);
+            java.net.HttpURLConnection c = openConn(url, "GET");
+            java.io.InputStream is = c.getInputStream();
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(out);
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = is.read(buf)) > 0) fos.write(buf, 0, n);
+            fos.close();
+            is.close();
+            c.disconnect();
+            if (lrcText != null && lrcText.length() > 0) {
+                String baseName = safe.replaceAll("\\.[^.]+$", "");
+                java.io.File lrc = new java.io.File(dir, baseName + ".lrc");
+                java.io.FileOutputStream lf = new java.io.FileOutputStream(lrc);
+                lf.write(lrcText.getBytes("UTF-8"));
+                lf.close();
+            }
+            android.media.MediaScannerConnection.scanFile(act, new String[]{out.getAbsolutePath()}, null, null);
+            return "{\"ok\":true,\"path\":\"" + out.getAbsolutePath().replace("\"", " ") + "\"}";
+        } catch (Exception e) {
+            return "{\"ok\":false}";
+        }
+    }
+
+
+    /** 异步下载 + 进度回调 */
+    @JavascriptInterface
+    public void downloadAsync(final String url, final String fileName, final String lrcText) {
+        new Thread(() -> {
+            String safe = fileName.replaceAll("[\\\\/:*?\"<>|]", "_");
+            java.io.File dir = AudioStore.pickWritableDir(act);
+            java.io.File out = new java.io.File(dir, safe);
+            long got = 0, total = 0;
+            try {
+                // 最多两次：CDN 偶尔抽风，换一次连接往往就好了
+                for (int attempt = 0; attempt < 2; attempt++) {
+                    got = 0;
+                    total = 0;
+                    java.net.HttpURLConnection c = null;
+                    try {
+                        c = openConn(url, "GET");
+                        c.connect();
+                        int code = c.getResponseCode();
+                        if (code >= 400) {
+                            throw new java.io.IOException("HTTP " + code + " " + c.getResponseMessage());
+                        }
+                        String ct = String.valueOf(c.getContentType()).toLowerCase();
+                        if (ct.contains("text/html") || ct.contains("json")) {
+                            throw new java.io.IOException("服务器返回的不是音频（" + ct + "），可能需要会员或已下架");
+                        }
+                        total = c.getContentLengthLong();
+                        java.io.InputStream is = c.getInputStream();
+                        java.io.FileOutputStream fos;
+                        try {
+                            fos = new java.io.FileOutputStream(out);
+                        } catch (Exception we) {
+                            // 公共 Music 目录写不进（Android 11+ 没有「所有文件访问」很常见）→ 退到 App 私有目录
+                            dir = AudioStore.privateDir(act);
+                            out = new java.io.File(dir, safe);
+                            fos = new java.io.FileOutputStream(out);
+                        }
+                        byte[] buf = new byte[65536];
+                        int n;
+                        long last = 0;
+                        while ((n = is.read(buf)) > 0) {
+                            fos.write(buf, 0, n);
+                            got += n;
+                            long now = System.currentTimeMillis();
+                            if (now - last > 220) {
+                                last = now;
+                                int pct = total > 0 ? (int) (got * 100 / total) : -1;
+                                js("window.onDownload&&window.onDownload(" + pct + "," + jsStr(safe) + "," + got + "," + total + ")");
+                            }
+                        }
+                        fos.flush();
+                        fos.close();
+                        is.close();
+                        c.disconnect();
+                        if (total > 0 && got < total) {
+                            throw new java.io.IOException("下载不完整 " + got + "/" + total + " 字节");
+                        }
+                        if (got < 20000) {
+                            throw new java.io.IOException("只拿到 " + got + " 字节（像是试听片段或出错页）");
+                        }
+                        break;
+                    } catch (Exception e1) {
+                        try { if (c != null) c.disconnect(); } catch (Exception ig) { }
+                        if (attempt >= 1) throw e1;
+                        try { Thread.sleep(800); } catch (InterruptedException ig) { }
+                    }
+                }
+                if (lrcText != null && lrcText.length() > 0) {
+                    String baseName = safe.replaceAll("\\.[^.]+$", "");
+                    java.io.File lrc = new java.io.File(dir, baseName + ".lrc");
+                    java.io.FileOutputStream lf = new java.io.FileOutputStream(lrc);
+                    lf.write(lrcText.getBytes("UTF-8"));
+                    lf.close();
+                }
+                android.media.MediaScannerConnection.scanFile(act, new String[]{out.getAbsolutePath()}, null, null);
+                js("window.onDownloadDone&&window.onDownloadDone(true," + jsStr(out.getAbsolutePath()) + ")");
+            } catch (final Exception e) {
+                // 半截文件直接删掉，免得曲库里留一条打不开的
+                try { if (out.exists()) out.delete(); } catch (Exception ig) { }
+                js("window.onDownloadDone&&window.onDownloadDone(false," + jsStr(String.valueOf(e.getMessage())) + ")");
+            }
+        }).start();
+    }
+
+    @JavascriptInterface
+    public boolean saveLyric(String audioPath, String text) {
+        try {
+            java.io.File dir = new java.io.File(act.getExternalFilesDir(null), "lyrics");
+            if (!dir.exists()) dir.mkdirs();
+            String key = Integer.toHexString(audioPath.hashCode());
+            java.io.File f = new java.io.File(dir, key + ".lrc");
+            java.io.FileOutputStream fo = new java.io.FileOutputStream(f);
+            fo.write(text.getBytes("UTF-8"));
+            fo.close();
+            return true;
+        } catch (Exception e) { return false; }
+    }
+
+    /** 按文件名兜底找私有歌词（目录变更后 hash 会变） */
+    @JavascriptInterface
+    public String loadLyricByBase(String audioPath) {
+        try {
+            java.io.File dir = new java.io.File(act.getExternalFilesDir(null), "lyrics");
+            if (!dir.exists()) return null;
+            String base = audioPath.substring(audioPath.lastIndexOf('/') + 1).replaceAll("\\.[^.]+$", "");
+            java.io.File[] files = dir.listFiles();
+            if (files == null) return null;
+            for (java.io.File f : files) {
+                String saved = sp.getString("lrcpath:" + f.getName(), "");
+                if (saved.isEmpty()) continue;
+                String sb = saved.substring(saved.lastIndexOf('/') + 1).replaceAll("\\.[^.]+$", "");
+                if (sb.equals(base)) return readText(f.getAbsolutePath());
+            }
+            return null;
+        } catch (Exception e) { return null; }
+    }
+
+    @JavascriptInterface
+    public String loadLyric(String audioPath) {
+        try {
+            java.io.File dir = new java.io.File(act.getExternalFilesDir(null), "lyrics");
+            String key = Integer.toHexString(audioPath.hashCode());
+            java.io.File f = new java.io.File(dir, key + ".lrc");
+            if (!f.exists()) return null;
+            return readText(f.getAbsolutePath());
+        } catch (Exception e) { return null; }
+    }
+
+
+    /** 存储诊断：给前端排查「下完了看不到」用 */
+    @JavascriptInterface
+    public String storageInfo() {
+        JSONObject o = new JSONObject();
+        try {
+            java.io.File pub = AudioStore.rootDir();
+            java.io.File pri = AudioStore.privateDir(act);
+            o.put("public", pub.getAbsolutePath());
+            o.put("publicExists", pub.exists());
+            o.put("publicPick", AudioStore.pickWritableDir(act).getAbsolutePath());
+            o.put("private", pri.getAbsolutePath());
+            o.put("privateExists", pri.exists());
+            List2 c1 = countAudio(pub), c2 = countAudio(pri);
+            o.put("publicAudio", c1.n);
+            o.put("privateAudio", c2.n);
+            o.put("publicListable", c1.listable);
+            o.put("privateListable", c2.listable);
+            o.put("allFiles", hasAllFiles());
+            o.put("sdk", android.os.Build.VERSION.SDK_INT);
+        } catch (Exception e) {
+            try { o.put("error", String.valueOf(e.getMessage())); } catch (Exception ignored) { }
+        }
+        return o.toString();
+    }
+
+    private static class List2 { int n; boolean listable; }
+
+    private static List2 countAudio(java.io.File d) {
+        List2 r = new List2();
+        try {
+            java.io.File[] fs = d.listFiles();
+            if (fs == null) return r;
+            r.listable = true;
+            for (java.io.File f : fs) {
+                String n = f.getName().toLowerCase();
+                if (n.endsWith(".mp3") || n.endsWith(".flac") || n.endsWith(".m4a")
+                        || n.endsWith(".wav") || n.endsWith(".ogg") || n.endsWith(".aac")
+                        || n.endsWith(".opus")) r.n++;
+            }
+        } catch (Exception ignored) { }
+        return r;
+    }
+
+    /** 是否已拿到「所有文件访问权限」（Android 11+ 在共享存储里删/写别人的文件必须要它） */
+    @JavascriptInterface
+    public boolean hasAllFiles() {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                return android.os.Environment.isExternalStorageManager();
+            }
+            return true;
+        } catch (Throwable t) { return true; }
+    }
+
+    /** 跳系统「所有文件访问权限」设置页 */
+    @JavascriptInterface
+    public boolean openAllFilesSettings() {
+        try {
+            if (android.os.Build.VERSION.SDK_INT < 30) return false;
+            android.content.Intent i = new android.content.Intent(
+                    android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+            i.setData(android.net.Uri.parse("package:" + act.getPackageName()));
+            i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            act.startActivity(i);
+            return true;
+        } catch (Exception e) {
+            try {
+                android.content.Intent i2 = new android.content.Intent(
+                        android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+                i2.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                act.startActivity(i2);
+                return true;
+            } catch (Exception e2) { return false; }
+        }
+    }
+
+    @JavascriptInterface
+    public String removeFile(String path) {
+        JSONObject o = new JSONObject();
+        try {
+            java.io.File f = new java.io.File(path);
+            boolean existed = f.exists();
+            boolean ok = existed ? f.delete() : true;
+            if (ok) {
+                String base = path.replaceAll("\\.[^.]+$", "");
+                java.io.File lrc = new java.io.File(base + ".lrc");
+                if (lrc.exists()) lrc.delete();
+                try {
+                    act.getContentResolver().delete(
+                        android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                        android.provider.MediaStore.MediaColumns.DATA + "=?", new String[]{path});
+                } catch (Throwable ignored) { }
+                android.media.MediaScannerConnection.scanFile(act, new String[]{path}, null, null);
+            }
+            o.put("ok", ok);
+            if (!ok) {
+                boolean need = !hasAllFiles();
+                o.put("needPerm", need);
+                o.put("reason", need ? "需要「所有文件访问权限」" : "文件删不掉（可能被其他程序占用）");
+            }
+            return o.toString();
+        } catch (Exception e) {
+            return "{\"ok\":false,\"reason\":\"删除异常\"}";
+        }
+    }
+
+
+    @JavascriptInterface
+    public int bitrate(String path) {
+        android.media.MediaMetadataRetriever mmr = new android.media.MediaMetadataRetriever();
+        try {
+            mmr.setDataSource(path);
+            String v = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_BITRATE);
+            return v == null ? 0 : Math.round(Integer.parseInt(v) / 1000f);
+        } catch (Exception e) { return 0; }
+        finally { try { mmr.release(); } catch (Exception ignored) { } }
+    }
+
+
+    private void js(final String code) {
+        if (web == null) return;
+        mainHandler.post(() -> {
+            if (web != null) web.evaluateJavascript(code, null);
+        });
+    }
+
+    /** 原生主线程 Looper 延时回调（绕过 WebView 后台 setTimeout 节流） */
+    @JavascriptInterface
+    public void nativeDelay(final int id, final int ms) {
+        mainHandler.postDelayed(() -> {
+            if (web != null) web.evaluateJavascript("window.__onNativeDelay&&window.__onNativeDelay(" + id + ")", null);
+        }, Math.max(0, ms));
+    }
+
+    /** 通知前台服务保持 CPU 唤醒锁并在通知栏展示后台匹配/下载进度 */
+    @JavascriptInterface
+    public void setBgTask(final boolean active, final String title, final String sub) {
+        mainHandler.post(() -> {
+            PlaybackService s = svc();
+            if (s != null) s.setBgTaskState(active, title, sub);
+        });
+    }
+
+    /** 把任意字符串安全地塞进 evaluateJavascript 的单引号字符串里 */
+    private static String jsStr(String s) {
+        if (s == null) return "''";
+        StringBuilder b = new StringBuilder("'");
+        for (int i = 0; i < s.length(); i++) {
+            char ch = s.charAt(i);
+            if (ch == '\'' || ch == '\\') { b.append('\\'); b.append(ch); }
+            else if (ch == '\n' || ch == '\r') { b.append(' '); }
+            else { b.append(ch); }
+        }
+        return b.append("'").toString();
+    }
+
+    // ---------------- 悬浮歌词 ----------------
+    @JavascriptInterface
+    public boolean overlayAllowed() { return LyricsOverlay.canDraw(act); }
+
+    @JavascriptInterface
+    public void overlaySettings() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            android.content.Intent i = new android.content.Intent(
+                    android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    android.net.Uri.parse("package:" + act.getPackageName()));
+            i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            act.startActivity(i);
+        }
+    }
+
+    @JavascriptInterface
+    public void showOverlay() { LyricsOverlay.get(act).show(); }
+
+    @JavascriptInterface
+    public void hideOverlay() { LyricsOverlay.get(act).hide(); }
+
+    @JavascriptInterface
+    public boolean overlayShown() { return LyricsOverlay.get(act).isShowing(); }
+
+    @JavascriptInterface
+    public void overlayLock(boolean v) { LyricsOverlay.get(act).setLocked(v); }
+
+    @JavascriptInterface
+    public boolean overlayLocked() { return LyricsOverlay.get(act).isLocked(); }
+
+    @JavascriptInterface
+    public void overlayColor(String hex) {
+        try {
+            int c = (int) Long.parseLong(hex.replace("#", ""), 16);
+            if (hex.replace("#", "").length() <= 6) c |= 0xFF000000;
+            LyricsOverlay.get(act).setColor(c);
+        } catch (Exception ignored) { }
+    }
+
+    @JavascriptInterface
+    public void overlayText(String a, String b) { LyricsOverlay.get(act).setText(a, b); }
+
+    @JavascriptInterface
+    public String rootDir() { return AudioStore.rootDir().getAbsolutePath(); }
+
+    /** 新建歌单子文件夹 */
+    @JavascriptInterface
+    public boolean mkdir(String name) {
+        try {
+            java.io.File d = new java.io.File(AudioStore.rootDir(), name.replaceAll("[\\\\/:*?\"<>|]", "_"));
+            return d.exists() || d.mkdirs();
+        } catch (Exception e) { return false; }
+    }
+
+    @JavascriptInterface
+    public String buildTag() { return "2026-11-15.12:40-b73"; }
+
+    @JavascriptInterface
+    public String deviceInfo() {
+        try {
+            JSONObject o = new JSONObject();
+            o.put("model", android.os.Build.MODEL);
+            o.put("sdk", android.os.Build.VERSION.SDK_INT);
+            float w = act.getResources().getConfiguration().screenWidthDp;
+            float h = act.getResources().getConfiguration().screenHeightDp;
+            o.put("dpWidth", w);
+            o.put("dpHeight", h);
+            o.put("smallestDp", act.getResources().getConfiguration().smallestScreenWidthDp);
+            return o.toString();
+        } catch (Exception e) {
+            return "{}";
+        }
+    }
+}

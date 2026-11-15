@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff" id="metaThemeColor">
+<title>music-play</title>
+<link rel="stylesheet" href="css/mobile.css">
+</head>
+<body>
+<div id="app">
+  <!-- 侧栏（平板/宽屏） -->
+  <aside id="rail" class="rail">
+    <div class="rail-logo">music-play</div>
+    <nav class="rail-nav">
+      <button class="rail-item" data-tab="home">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 10.5 12 4l8.5 6.5"/><path d="M6 9.8V20h12V9.8"/></svg>
+        <span>首页</span>
+      </button>
+      <button class="rail-item" data-tab="me">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.4" r="3.6"/><path d="M4.8 20c.6-3.7 3.6-5.6 7.2-5.6s6.6 1.9 7.2 5.6"/></svg>
+        <span>个人</span>
+      </button>
+    </nav>
+    <div class="rail-sep"></div>
+    <nav class="rail-nav">
+      <button class="rail-item" data-go="local">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V6.5l9-2V16"/><circle cx="6.6" cy="18" r="2.4"/><circle cx="15.6" cy="16" r="2.4"/></svg>
+        <span>本地音乐</span>
+      </button>
+      <button class="rail-item" data-go="liked">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7.2-4.4-7.2-9.4A4.2 4.2 0 0 1 12 7.6a4.2 4.2 0 0 1 7.2 3C19.2 15.6 12 20 12 20z"/></svg>
+        <span>我喜欢的音乐</span>
+      </button>
+      <button class="rail-item" data-go="recent">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.4"/><path d="M12 7.6V12l3 1.8"/></svg>
+        <span>最近播放</span>
+      </button>
+      <button class="rail-item" data-go="playlists">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5h16M4 12h16M4 17.5h10"/></svg>
+        <span>歌单</span>
+      </button>
+      <button class="rail-item" data-go="import">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5v10"/><path d="M8.2 10.8 12 14.6l3.8-3.8"/><path d="M4.8 18.5h14.4"/></svg>
+        <span>批量导入</span>
+      </button>
+      <button class="rail-item" data-go="health">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>
+        <span>曲库体检</span>
+      </button>
+    </nav>
+    <div class="rail-foot">
+      <button class="rail-theme-btn" id="railThemeBtn" title="切换外观主题">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <span id="railThemeLabel">外观：跟随系统</span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- 主内容 -->
+  <main id="main">
+    <div id="taskBanner" class="task-banner hidden"></div>
+    <div id="view"></div>
+    <div id="mini" class="mini hidden" data-np="1">
+      <div class="mini-cover" id="miniCover"></div>
+      <div class="mini-meta">
+        <div class="mini-title" id="miniTitle">未在播放</div>
+        <div class="mini-artist" id="miniArtist">—</div>
+      </div>
+      <button class="mini-btn" id="miniPlay" aria-label="播放/暂停">
+        <svg viewBox="0 0 24 24" id="miniIcon"><path d="M8 5.6v12.8a.9.9 0 0 0 1.38.77l10-6.4a.9.9 0 0 0 0-1.54l-10-6.4A.9.9 0 0 0 8 5.6z"/></svg>
+      </button>
+      <button class="mini-btn" id="miniNext" aria-label="下一首">
+        <svg viewBox="0 0 24 24"><path d="M6 5.6v12.8a.8.8 0 0 0 1.24.67l8.2-6.4a.8.8 0 0 0 0-1.34l-8.2-6.4A.8.8 0 0 0 6 5.6z"/><rect x="16.4" y="5" width="2.6" height="14" rx="1.2"/></svg>
+      </button>
+      <button class="mini-btn" id="miniQueue" aria-label="播放队列">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+      </button>
+      <div class="mini-bar"><div class="mini-bar-in" id="miniBar"></div></div>
+    </div>
+  </main>
+
+  <!-- 底部标签（手机） -->
+  <nav id="tabs" class="tabs">
+    <button class="tab active" data-tab="home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 10.5 12 4l8.5 6.5"/><path d="M6 9.8V20h12V9.8"/></svg>
+      <span>首页</span>
+    </button>
+    <button class="tab" data-tab="me">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.4" r="3.6"/><path d="M4.8 20c.6-3.7 3.6-5.6 7.2-5.6s6.6 1.9 7.2 5.6"/></svg>
+      <span>个人</span>
+    </button>
+  </nav>
+</div>
+
+<!-- 播放页（全屏，含歌词） -->
+<div id="np" class="np hidden">
+  <div class="np-bg" id="npBg"></div>
+  <div class="np-veil"></div>
+  <div class="np-head">
+    <button class="np-back" id="npBack" aria-label="收起播放页">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+    <div class="np-head-center">
+      <div class="np-headtitle" id="npHeadTitle">正在播放</div>
+      <div class="np-headsub" id="npHeadSub">本地曲库</div>
+    </div>
+    <button class="np-off" id="npFloat" title="悬浮歌词">浮词</button>
+    <button class="np-off" id="npLock" title="锁定/解锁悬浮歌词">锁</button>
+    <span class="np-offgrp">
+      <button class="np-off" id="npOffDn" aria-label="歌词提前">−</button>
+      <button class="np-off" id="npOffset" title="歌词偏移">0.0s</button>
+      <button class="np-off" id="npOffUp" aria-label="歌词延后">＋</button>
+    </span>
+  </div>
+  <div class="np-body">
+    <div class="np-stage-wrap">
+      <div class="np-stage">
+        <div class="np-disc"><div class="np-cover" id="npCover"></div></div>
+      </div>
+      <div class="np-peek" id="npPeek" role="button" tabindex="0" aria-label="展开歌词">
+        <div class="np-peek-main" id="npPeekMain">轻点唱片查看双语歌词</div>
+        <div class="np-peek-sub" id="npPeekSub"></div>
+      </div>
+      <div class="np-hint">轻点唱片查看歌词</div>
+    </div>
+    <div class="np-lyrics-wrap">
+      <div class="np-lyrics" id="npLyrics"><div class="np-empty">没有歌词</div></div>
+      <button class="np-resume hidden" id="npResume" type="button">回到当前句</button>
+    </div>
+  </div>
+  <div class="np-foot">
+    <div class="np-meta-bar">
+      <div class="np-meta-text">
+        <div class="np-title" id="npTitle">—</div>
+        <div class="np-artist" id="npArtist">—</div>
+      </div>
+      <div class="np-actions">
+        <button class="np-act-btn" id="npFav" aria-label="喜欢" title="喜欢">
+          <svg viewBox="0 0 24 24" id="npFavIcon" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7.2-4.4-7.2-9.4A4.2 4.2 0 0 1 12 7.6a4.2 4.2 0 0 1 7.2 3C19.2 15.6 12 20 12 20z"/></svg>
+        </button>
+        <button class="np-act-btn np-source-btn" id="npSource" aria-label="更换声源" title="更换当前歌曲声源">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M4 20L21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/></svg>
+          <span>换声源</span>
+        </button>
+        <button class="np-act-btn" id="npAddPl" aria-label="加入歌单" title="加入歌单">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="np-seek"><span id="npCur">0:00</span><input type="range" id="npRange" min="0" max="1000" value="0"><span id="npDur">0:00</span></div>
+    <div class="np-ctrl">
+      <button id="npShuffle" aria-label="播放模式" title="切换播放模式"><svg viewBox="0 0 24 24" id="npModeIcon"><path d="M17 3.6l3.4 3.4-3.4 3.4V8.3h-1.7c-1.2 0-2 .5-2.8 1.6l-.9 1.2-1.2-1.6.7-1C12.3 6.7 13.6 6 15.3 6H17V3.6zM3 6h2.3c1.7 0 3 .7 4.2 2.2l5.1 6.9c.8 1.1 1.6 1.6 2.8 1.6H20v-2.1l3.4 3.4L20 21.4v-2.7h-2.6c-1.7 0-3-.7-4.2-2.2L8.1 9.6C7.3 8.5 6.5 8 5.3 8H3V6zm0 10h2.3c.5 0 .9-.1 1.3-.3l1.3 1.7c-.8.4-1.7.6-2.6.6H3v-2z"/></svg></button>
+      <button id="npPrev" aria-label="上一首"><svg viewBox="0 0 24 24"><path d="M18 5.6v12.8a.8.8 0 0 1-1.24.67l-8.2-6.4a.8.8 0 0 1 0-1.34l8.2-6.4A.8.8 0 0 1 18 5.6z"/><rect x="5" y="5" width="2.6" height="14" rx="1.2"/></svg></button>
+      <button id="npPlay" class="np-play" aria-label="播放/暂停"><svg viewBox="0 0 24 24" id="npIcon"><path d="M8 5.6v12.8a.9.9 0 0 0 1.38.77l10-6.4a.9.9 0 0 0 0-1.54l-10-6.4A.9.9 0 0 0 8 5.6z"/></svg></button>
+      <button id="npNext" aria-label="下一首"><svg viewBox="0 0 24 24"><path d="M6 5.6v12.8a.8.8 0 0 0 1.24.67l8.2-6.4a.8.8 0 0 0 0-1.34l-8.2-6.4A.8.8 0 0 0 6 5.6z"/><rect x="16.4" y="5" width="2.6" height="14" rx="1.2"/></svg></button>
+      <button id="npQueue" aria-label="播放队列" title="当前播放队列">
+        <svg viewBox="0 0 24 24"><path d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2zm13 0l4 2.5-4 2.5v-5z"/></svg>
+        <span class="np-q-badge" id="npQueueCount"></span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<dialog id="sheetDlg" class="sheet-dlg" aria-label="操作面板"></dialog>
+
+<script src="js/neta.js"></script>
+<script src="js/mobile.js"></script>
+</body>
+</html>
