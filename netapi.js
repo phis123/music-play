@@ -13,6 +13,17 @@ const { app } = require('electron')
 let ncmPort = 0
 let bootPromise = null
 
+// 网易云 API 启动重试配置（见核实报告第 6 节）：
+// - BOOT_MAX_RETRIES：启动失败后最多再试 2 次，即最多尝试 3 次；
+// - BOOT_RETRY_DELAY_MS：每次重试前等待 1s（固定退避，不引入指数退避依赖）；
+// - BOOT_START_PORT：端口从 3300 起自动挑选（行为不变）；
+// - BOOT_MAX_PORT_TRIES：findFreePort 最多探测 100 个端口，超限即抛错，
+//   避免原先无上限递归在端口连续被占时无限加深。
+const BOOT_MAX_RETRIES = 2
+const BOOT_RETRY_DELAY_MS = 1000
+const BOOT_START_PORT = 3300
+const BOOT_MAX_PORT_TRIES = 100
+
 // 诊断日志（应用自带目录，不写系统 TEMP）
 function log(msg) {
   try {
@@ -21,10 +32,17 @@ function log(msg) {
   } catch { /* 忽略 */ }
 }
 
-function findFreePort(start) {
-  return new Promise((resolve) => {
+function findFreePort(start, tried = 0) {
+  return new Promise((resolve, reject) => {
+    if (tried >= BOOT_MAX_PORT_TRIES) {
+      reject(new Error(`没有空闲端口（已尝试 ${BOOT_MAX_PORT_TRIES} 个，从 ${start - tried} 起）`))
+      return
+    }
     const srv = net.createServer()
-    srv.once('error', () => resolve(findFreePort(start + 1)))
+    srv.once('error', () => {
+      // 端口被占用：探测下一个端口；tried 计数由上限兜底，不再无上限递归
+      findFreePort(start + 1, tried + 1).then(resolve, reject)
+    })
     srv.once('listening', () => {
       const p = srv.address().port
       srv.close(() => resolve(p))
@@ -37,34 +55,48 @@ async function ensureServer() {
   if (ncmPort) return ncmPort
   if (bootPromise) return bootPromise
   bootPromise = (async () => {
-   try {
-    // 关键：把临时目录指到应用自己的目录，不写系统 TEMP
-    const tmp = path.join(app.getPath('userData'), 'ncm-tmp')
-    fs.mkdirSync(tmp, { recursive: true })
-    process.env.TEMP = tmp
-    process.env.TMP = tmp
+    let lastErr = null
+    for (let attempt = 0; attempt <= BOOT_MAX_RETRIES; attempt++) {
+     try {
+      // 关键：把临时目录指到应用自己的目录，不写系统 TEMP
+      const tmp = path.join(app.getPath('userData'), 'ncm-tmp')
+      fs.mkdirSync(tmp, { recursive: true })
+      process.env.TEMP = tmp
+      process.env.TMP = tmp
 
-    // 内置引导文件（api-enhanced 在 require 时就会读这两个文件）
-    const assets = path.join(__dirname, 'assets')
-    for (const f of ['anonymous_token', 'xeapi_public_key']) {
-      const dst = path.join(tmp, f)
-      if (fs.existsSync(dst)) continue
-      const srcFile = path.join(assets, f)
-      if (fs.existsSync(srcFile)) fs.copyFileSync(srcFile, dst)
-      else fs.writeFileSync(dst, '')
+      // 内置引导文件（api-enhanced 在 require 时就会读这两个文件）
+      const assets = path.join(__dirname, 'assets')
+      for (const f of ['anonymous_token', 'xeapi_public_key']) {
+        const dst = path.join(tmp, f)
+        if (fs.existsSync(dst)) continue
+        const srcFile = path.join(assets, f)
+        if (fs.existsSync(srcFile)) fs.copyFileSync(srcFile, dst)
+        else fs.writeFileSync(dst, '')
+      }
+
+      // 每次尝试都重新挑端口：若上次是 EADDRINUSE（探测与绑定之间的
+      // TOCTOU 窗口被别的进程抢占），这次会拿到另一个空闲端口再试。
+      const port = await findFreePort(BOOT_START_PORT)
+      log(`booting on port ${port}, tmp=${tmp}`)
+      const { serveNcmApi } = require('@neteasecloudmusicapienhanced/api/server.js')
+      await serveNcmApi({ port, host: '127.0.0.1', checkVersion: false })
+      ncmPort = port
+      log(`ready on ${port}`)
+      return port
+     } catch (e) {
+       lastErr = e
+       log(`BOOT FAILED (attempt ${attempt + 1}/${BOOT_MAX_RETRIES + 1}): ` + (e && e.stack || e))
+       if (attempt < BOOT_MAX_RETRIES) {
+         if (e && e.code === 'EADDRINUSE') log('端口被抢占，下次重试将重新挑选端口')
+         await new Promise((r) => setTimeout(r, BOOT_RETRY_DELAY_MS))
+       }
+     }
     }
-
-    const port = await findFreePort(3300)
-    log(`booting on port ${port}, tmp=${tmp}`)
-    const { serveNcmApi } = require('@neteasecloudmusicapienhanced/api/server.js')
-    await serveNcmApi({ port, host: '127.0.0.1', checkVersion: false })
-    ncmPort = port
-    log(`ready on ${port}`)
-    return port
-   } catch (e) {
-     log('BOOT FAILED: ' + (e && e.stack || e))
-     throw e
-   }
+    // 全部尝试失败：先把 bootPromise 置空再重抛（ncmPort 已是 0，无需另设），
+    // 让下一次调用可以重新启动；否则调用方会永远拿到同一个已 rejected 的
+    // Promise，直到重启应用（见核实报告第 6 节）。
+    bootPromise = null
+    throw lastErr
   })()
   return bootPromise
 }
