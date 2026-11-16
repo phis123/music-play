@@ -377,7 +377,8 @@ function setCoverCache(k, v) {
   }
   coverCache.set(k, v)
 }
-const fileUrl = (p) => 'file:///' + encodeURI(String(p).replace(/\\/g, '/'))
+const { pathToFileURL } = require('url')
+const fileUrl = (p) => pathToFileURL(path.resolve(String(p))).href
 
 ipcMain.handle('cover:get', async (_e, filePath) => {
   try { verifyIpc(_e) } catch { return '' }

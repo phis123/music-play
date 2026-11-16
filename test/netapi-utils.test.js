@@ -54,3 +54,11 @@ test('findFreePort：返回 >= start 的可用端口，且确实能 bind', async
     srv.listen(port, '127.0.0.1')
   })
 })
+
+test('含 # 特殊字符的封面路径（如 #1f1e33.jpg）转 file:// URL 时必须编码为 %23，不可被解析为 hash', () => {
+  const path = require('node:path')
+  const { pathToFileURL } = require('node:url')
+  const u = pathToFileURL(path.resolve('/music/#1f1e33.jpg')).href
+  assert.ok(u.includes('%231f1e33.jpg'), `期望包含 %231f1e33.jpg，实际为 ${u}`)
+  assert.equal(new URL(u).hash, '', 'file:// URL 不应把文件名中的 # 解析成 URL hash')
+})

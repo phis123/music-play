@@ -153,6 +153,23 @@ public class Bridge {
         } finally {
             try { mmr.release(); } catch (Exception ignored) { }
         }
+        if (out.isEmpty()) {
+            try {
+                File sideJpg = new File(path.replaceAll("\\.[^.]+$", "") + ".jpg");
+                if (sideJpg.exists() && isInsideAllowedRoot(sideJpg) && sideJpg.length() > 0 && sideJpg.length() < 10 * 1024 * 1024) {
+                    byte[] buf = new byte[(int) sideJpg.length()];
+                    java.io.FileInputStream fis = new java.io.FileInputStream(sideJpg);
+                    int read = 0;
+                    while (read < buf.length) {
+                        int n = fis.read(buf, read, buf.length - read);
+                        if (n <= 0) break;
+                        read += n;
+                    }
+                    fis.close();
+                    out = "data:image/jpeg;base64," + android.util.Base64.encodeToString(buf, 0, read, android.util.Base64.NO_WRAP);
+                }
+            } catch (Exception ignored) { }
+        }
         synchronized (coverCache) {
             coverCache.put(path, out);
         }
