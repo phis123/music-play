@@ -33,8 +33,11 @@ app.commandLine.appendSwitch('disable-gpu-sandbox')
 const netapi = require('./netapi')
 
 const AUDIO_EXT = new Set(['.mp3', '.flac', '.wav', '.ogg', '.m4a', '.aac', '.opus'])
-const DEFAULT_ROOT = process.env.MUSIC_ROOT ||
-  'E:\\dsh\\work2\\conversations\\25_20261030_netease-podcast-lyrics\\out\\ncmv\\downloads'
+// 默认曲库：优先 MUSIC_ROOT 环境变量，否则用系统音乐目录。
+// 此前这里是作者本机绝对路径，已移除：新安装不应默认指向
+// 一个不存在的个人目录，否则首次启动会静默空库。已有 user-config.json
+// 或 MUSIC_ROOT 时仍优先使用它们；用户也可随时用“选择目录”更改。
+const DEFAULT_ROOT = process.env.MUSIC_ROOT || app.getPath('music')
 
 let win = null
 let root = DEFAULT_ROOT
