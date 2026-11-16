@@ -261,35 +261,96 @@ async function fetchBuffer(url) {
   })
 }
 
+// 单曲音频下载上限：200MB。选值理由：单曲即使是无损 FLAC（约 5MB/分钟，
+// 一首 10 分钟长曲约 50MB）也远低于此值；200MB 只是防无界下载的安全网，
+// 不是“预期大小”。超过即拒绝，避免错误响应/无限流把磁盘写满。
+// （核实报告第 5 节：原代码无任何大小限制，fetchBuffer 同样无上限——
+// 本次只约束 downloadTo，fetchBuffer 的封面图片不在本次范围。）
+const MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024
+
+// 音频下载只接受的 Content-Type：audio/* 与 application/octet-stream。
+// 明确拒绝错误页面：text/html / application/json（与 Android
+// downloadAsync 的拒绝清单一致，Bridge.java:296）。
+// Content-Type 缺失时放行——部分 CDN 不返回标准类型，此时仍由大小上限
+// 与 got/total 完整性校验兜底；但 text/html / json 一律不放过。
+function checkAudioContentType(ct) {
+  const t = String(ct || '').toLowerCase().split(';')[0].trim()
+  if (!t) return // 缺失：无法判断，放行，靠大小与完整性校验兜底
+  if (t.includes('text/html') || t.includes('json')) {
+    throw new Error('服务器返回的不是音频（' + t + '），可能需要会员或已下架')
+  }
+  if (t.startsWith('audio/') || t === 'application/octet-stream') return
+  throw new Error('服务器返回的不是音频（Content-Type: ' + t + '）')
+}
+
+// 进程内下载锁：按最终目标文件路径复用进行中的下载，避免两次
+// downloadVoice 共用同一个 .downloading 交错写入（核实报告第 5 节
+// “并发冲突”潜在项）。key 用 path.resolve 归一化；失败或成功后
+// 从 map 移除，下次调用可重新下载。只防同一进程内并发，不防多进程。
+const inflightDownloads = new Map()
+
 function downloadTo(url, filePath, onProgress) {
   return new Promise((resolve, reject) => {
     const mod = url.startsWith('https') ? https : http
+    let out = null
+    let settled = false
+    // 任意失败路径：关闭写流并删除临时文件，避免残留 .downloading
+    const cleanup = () => {
+      try { if (out) out.destroy() } catch { /* 忽略 */ }
+      try { fs.unlinkSync(filePath) } catch { /* 不存在或删不掉时忽略 */ }
+    }
+    const fail = (err) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      // 断开请求，停止继续收数据（失败路径不再消费响应体）
+      try { req.destroy() } catch { /* 尚未建立或已关闭时忽略 */ }
+      reject(err)
+    }
     const req = mod.get(url, { timeout: 60000 }, (res) => {
-      if (res.statusCode !== 200) return reject(new Error('HTTP ' + res.statusCode))
+      if (res.statusCode !== 200) return fail(new Error('HTTP ' + res.statusCode))
       const total = Number(res.headers['content-length'] || 0)
+      // 大小上限：content-length 超限直接拒绝，不建文件、不写盘
+      if (total > MAX_DOWNLOAD_BYTES) {
+        return fail(new Error('文件过大：' + total + ' 字节，超过上限 ' + MAX_DOWNLOAD_BYTES + ' 字节'))
+      }
+      // 内容类型校验：错误页面（HTML/JSON）即使返回 200 也不当音频保存
+      try { checkAudioContentType(res.headers['content-type']) } catch (e) { return fail(e) }
       let got = 0
-      const out = fs.createWriteStream(filePath)
+      out = fs.createWriteStream(filePath)
       res.on('data', (c) => {
         got += c.length
+        // 流式累计超限即 abort：content-length 缺失或撒谎时仍能兜底
+        if (got > MAX_DOWNLOAD_BYTES) {
+          return fail(new Error('文件过大：已下载 ' + got + ' 字节，超过上限 ' + MAX_DOWNLOAD_BYTES + ' 字节'))
+        }
         if (onProgress && total) onProgress(got / total)
       })
+      res.on('error', fail)
       res.pipe(out)
-      out.on('finish', () => out.close(() => resolve({ bytes: got })))
-      out.on('error', reject)
+      out.on('finish', () => {
+        if (settled) return
+        // 完整性校验：服务端给了 content-length 时，实收字节必须一致
+        if (total > 0 && got !== total) {
+          return fail(new Error('下载不完整：已下载 ' + got + ' / ' + total + ' 字节'))
+        }
+        settled = true
+        out.close(() => resolve({ bytes: got }))
+      })
+      out.on('error', fail)
     })
     req.on('timeout', () => req.destroy(new Error('下载超时')))
-    req.on('error', reject)
+    req.on('error', fail)
   })
 }
 
 async function downloadVoice({ voice, song, dir, overwritePath }) {
-  await ensureServer()
+  // 先算出最终目标文件（不依赖网络），再按它加锁：同一目标并发两次时，
+  // 第二次直接复用进行中的 Promise，不会共用 .downloading 交错写入。
+  // 注意：overwritePath 的路径约束不在这里做——netapi 不知道曲库根，
+  // 由第 2 项 IPC 改动在 main.js 的 net:download / net:replaceSource
+  // handler 层约束；这里只保证内部生成的目标路径仍走 sanitize + 重名递增。
   const target = overwritePath ? path.dirname(overwritePath) : (dir || path.join(app.getPath('music'), 'music-play'))
-  await fsp.mkdir(target, { recursive: true })
-
-  const info = await trackInfo(voice.mainTrackId)
-  const url = info.url
-  if (!url) throw new Error('拿不到音频地址（可能是 VIP 限制）')
 
   let file = overwritePath
   if (!file) {
@@ -299,8 +360,31 @@ async function downloadVoice({ voice, song, dir, overwritePath }) {
     while (fs.existsSync(file)) { file = path.join(target, `${base} (${n++}).mp3`) }
   }
 
+  const key = path.resolve(file)
+  const existing = inflightDownloads.get(key)
+  if (existing) return existing
+  const p = downloadVoiceOnce({ voice, song, target, file })
+    .finally(() => { if (inflightDownloads.get(key) === p) inflightDownloads.delete(key) })
+  inflightDownloads.set(key, p)
+  return p
+}
+
+async function downloadVoiceOnce({ voice, song, target, file }) {
+  await ensureServer()
+  await fsp.mkdir(target, { recursive: true })
+
+  const info = await trackInfo(voice.mainTrackId)
+  const url = info.url
+  if (!url) throw new Error('拿不到音频地址（可能是 VIP 限制）')
+
   const tmpFile = file + '.downloading'
-  await downloadTo(url, tmpFile)
+  try {
+    await downloadTo(url, tmpFile)
+  } catch (e) {
+    // 纵深清理：downloadTo 失败时本应已删临时文件，这里再兜底一次
+    try { await fsp.unlink(tmpFile) } catch { /* 不存在或已清理时忽略 */ }
+    throw e
+  }
   try {
     await fsp.rename(tmpFile, file)
   } catch {
