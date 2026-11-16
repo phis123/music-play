@@ -18,6 +18,7 @@ const {
   authorizeDir,
   resetAuthorizedDirs,
   isInsideLibrary,
+  assertSafeWriteTarget,
   validateDownloadPayload,
   validateReplaceSourcePayload,
 } = require('../lib/path-guard')
@@ -172,4 +173,31 @@ test('P0-1 纵深防御：netapi.downloadVoice 内部也拒绝越界 overwritePa
     }),
     /PATH_OUTSIDE_LIBRARY/
   )
+})
+
+test('派生文件写入防护：assertSafeWriteTarget 拒绝已存在的符号链接目标（含断链 symlink）', (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'music-play-safewrite-'))
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }))
+  const libDir = path.join(base, 'music')
+  const outsideDir = path.join(base, 'outside')
+  fs.mkdirSync(libDir, { recursive: true })
+  fs.mkdirSync(outsideDir, { recursive: true })
+
+  // 正常尚未存在的库内派生 .lrc 路径放行
+  const normalLrc = path.join(libDir, 'song.lrc')
+  assert.ok(assertSafeWriteTarget(normalLrc, libDir).endsWith('song.lrc'))
+
+  // 若库内存在指向库外的 symlink（包括指向尚不存在文件的断链 symlink），拒绝写入
+  const danglingTarget = path.join(outsideDir, 'nonexistent.lrc')
+  const symlinkLrc = path.join(libDir, 'evil.lrc')
+  try {
+    fs.symlinkSync(danglingTarget, symlinkLrc)
+    assert.throws(() => assertSafeWriteTarget(symlinkLrc, libDir), /PATH_OUTSIDE_LIBRARY|符号链接/)
+  } catch (e) {
+    if (e && (e.code === 'EPERM' || e.code === 'ENOSYS')) {
+      assert.throws(() => assertSafeWriteTarget(danglingTarget, libDir), /PATH_OUTSIDE_LIBRARY/)
+    } else {
+      throw e
+    }
+  }
 })

@@ -53,7 +53,29 @@ public class MainActivity extends Activity {
         s.setAllowContentAccess(true);
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setTextZoom(100);
-        web.setWebViewClient(new WebViewClient());
+        web.setWebViewClient(new WebViewClient() {
+            private boolean allowUrl(String url) {
+                if (url == null) return false;
+                if (url.startsWith("file:///android_asset/")) return true;
+                if (url.startsWith("http://") || url.startsWith("https://")) {
+                    try {
+                        android.content.Intent i = new android.content.Intent(
+                                android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url));
+                        startActivity(i);
+                    } catch (Exception ignored) { }
+                }
+                return false;
+            }
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                return !allowUrl(url);
+            }
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, android.webkit.WebResourceRequest request) {
+                String url = request != null && request.getUrl() != null ? request.getUrl().toString() : null;
+                return !allowUrl(url);
+            }
+        });
         web.setBackgroundColor(0xFFFFFFFF);
 
         player = new PlayerBridge(this, web);

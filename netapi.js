@@ -8,7 +8,7 @@ const fsp = fs.promises
 const net = require('net')
 const http = require('http')
 const https = require('https')
-const { assertInsideLibrary } = require('./lib/path-guard')
+const { assertInsideLibrary, assertSafeWriteTarget } = require('./lib/path-guard')
 // Electron 只在应用内可用；测试时用 plain node 直接 require 本模块，
 // 此时 require('electron') 不存在（或只返回二进制路径字符串，无 app 对象），
 // 用一个最小的 app 桩代替，让 log() 等用到 app.getPath 的地方不至于在加载期
@@ -395,6 +395,12 @@ function downloadTo(url, filePath, onProgress) {
         if (onProgress && total) onProgress(got / total)
       })
       res.on('error', fail)
+      res.on('aborted', () => fail(new Error('下载不完整（aborted）：连接被提前关闭')))
+      res.on('close', () => {
+        if (!settled && !res.complete) {
+          fail(new Error('下载不完整（aborted）：响应未完整结束'))
+        }
+      })
       res.pipe(out)
       out.on('finish', () => {
         if (settled) return
@@ -453,8 +459,13 @@ async function downloadVoiceOnce({ voice, song, target, file }) {
   if (!url) throw new Error('拿不到音频地址（可能是 VIP 限制）')
 
   const tmpFile = file + '.downloading'
+  assertSafeWriteTarget(file, target)
+  assertSafeWriteTarget(tmpFile, target)
   try {
-    await downloadTo(url, tmpFile)
+    const dl = await downloadTo(url, tmpFile)
+    if (!dl || dl.bytes < 1024) {
+      throw new Error('下载内容为空或过小（' + (dl ? dl.bytes : 0) + ' 字节），已中止写入')
+    }
   } catch (e) {
     // 纵深清理：downloadTo 失败时本应已删临时文件，这里再兜底一次
     try { await fsp.unlink(tmpFile) } catch { /* 不存在或已清理时忽略 */ }
@@ -480,7 +491,10 @@ async function downloadVoiceOnce({ voice, song, target, file }) {
     if (song && song.album) tags.album = song.album
     const imgBuf = await coverBuffer(song && song.cover ? song : { name: (song && song.name) || voice.title, artist: song && song.artist, cover: (song && song.cover) || voice.cover })
     if (imgBuf && imgBuf.length) {
-      try { fs.writeFileSync(file.replace(/\.[^.]+$/, '') + '.jpg', imgBuf) } catch { }
+      try {
+        const jpgSide = assertSafeWriteTarget(file.replace(/\.[^.]+$/, '') + '.jpg', target)
+        fs.writeFileSync(jpgSide, imgBuf)
+      } catch { }
     }
     if (imgBuf && imgBuf.length) {
       tags.image = { mime: 'image/jpeg', type: { id: 3, name: 'front cover' }, description: 'cover', imageBuffer: imgBuf }
@@ -495,7 +509,7 @@ async function downloadVoiceOnce({ voice, song, target, file }) {
   try {
     const text = song && song.id ? await lyric(song.id) : ''
     if (text && text.trim()) {
-      lrcFile = file.replace(/\.mp3$/i, '.lrc')
+      lrcFile = assertSafeWriteTarget(file.replace(/\.mp3$/i, '.lrc'), target)
       await fsp.writeFile(lrcFile, text, 'utf8')
     }
   } catch { /* 歌词失败不影响下载 */ }

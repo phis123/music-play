@@ -113,19 +113,34 @@ public class Bridge {
     @JavascriptInterface
     public boolean lrcExists(String audioPath) {
         try {
-            return new File(audioPath.replaceAll("\\.[^.]+$", "") + ".lrc").exists();
+            File f = new File(audioPath.replaceAll("\\.[^.]+$", "") + ".lrc");
+            return isInsideAllowedRoot(f) && f.exists();
         } catch (Exception e) {
             return false;
         }
     }
 
-    /** 内嵌封面 → data URL（带缓存） */
-    private final java.util.HashMap<String, String> coverCache = new java.util.HashMap<>();
+    /** 内嵌封面 → data URL（带 LRU 容量上限缓存，防止大歌单内存膨胀） */
+    private static final int MAX_COVER_CACHE = 160;
+    private final java.util.LinkedHashMap<String, String> coverCache =
+            new java.util.LinkedHashMap<String, String>(200, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(java.util.Map.Entry<String, String> eldest) {
+                    return size() > MAX_COVER_CACHE;
+                }
+            };
 
     @JavascriptInterface
     public String cover(String path) {
         if (path == null) return "";
-        if (coverCache.containsKey(path)) return coverCache.get(path);
+        synchronized (coverCache) {
+            if (coverCache.containsKey(path)) return coverCache.get(path);
+        }
+        try {
+            if (!isInsideAllowedRoot(new File(path))) return "";
+        } catch (Exception e) {
+            return "";
+        }
         String out = "";
         android.media.MediaMetadataRetriever mmr = new android.media.MediaMetadataRetriever();
         try {
@@ -138,7 +153,9 @@ public class Bridge {
         } finally {
             try { mmr.release(); } catch (Exception ignored) { }
         }
-        coverCache.put(path, out);
+        synchronized (coverCache) {
+            coverCache.put(path, out);
+        }
         return out;
     }
 

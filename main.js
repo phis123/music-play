@@ -39,6 +39,7 @@ const {
   authorizeDir,
   assertInsideLibrary: _assertInsideLib,
   isInsideLibrary,
+  assertSafeWriteTarget: _assertSafeWrite,
   validateDownloadPayload,
   validateReplaceSourcePayload,
 } = require('./lib/path-guard')
@@ -48,6 +49,10 @@ const {
   assertTrustedIpcSender,
 } = require('./lib/ipc-guard')
 const assertInsideLibrary = (filePath, opts = {}) => _assertInsideLib(filePath, {
+  ...opts,
+  userDataDir: opts && opts.allowUserData ? app.getPath('userData') : '',
+})
+const assertSafeWriteTarget = (filePath, opts = {}) => _assertSafeWrite(filePath, {
   ...opts,
   userDataDir: opts && opts.allowUserData ? app.getPath('userData') : '',
 })
@@ -211,15 +216,20 @@ function parseName(base) {
   return { title: s || base, artist: '' }
 }
 
-async function walk(dir, out, depth = 0) {
-  if (depth > 8) return
+async function walk(dir, out, depth = 0, stats = { total: 0 }) {
+  if (depth > 8) return stats
   let ents
-  try { ents = await fsp.readdir(dir, { withFileTypes: true }) } catch { return }
+  try { ents = await fsp.readdir(dir, { withFileTypes: true }) } catch { return stats }
   for (const e of ents) {
     const p = path.join(dir, e.name)
-    if (e.isDirectory()) await walk(p, out, depth + 1)
-    else if (AUDIO_EXT.has(path.extname(e.name).toLowerCase())) out.push(p)
+    if (e.isDirectory()) {
+      await walk(p, out, depth + 1, stats)
+    } else if (AUDIO_EXT.has(path.extname(e.name).toLowerCase())) {
+      stats.total++
+      if (out.length < SCAN_MAX_TRACKS) out.push(p)
+    }
   }
+  return stats
 }
 
 // ---------- LRC 解析：同时间戳（±30ms）相邻两行 → 原文/译文配对 ----------
@@ -244,12 +254,11 @@ ipcMain.handle('library:scan', async (_e, dir) => {
     try { if (sender && !sender.isDestroyed()) sender.send('library:scan-progress', p) } catch { /* 渲染进程已关不影响扫描 */ }
   }
   const files = []
-  await walk(target, files)
-  // 不再静默截断：仍只返回前 5000 首（渲染层一次承载上限不变），但把总数与
-  // 截断标志一并返回，渲染层据此提示用户。
-  const total = files.length
+  const walkStats = await walk(target, files)
+  // 遍历阶段只保留前 SCAN_MAX_TRACKS 个路径（控制超大目录内存占用），同时统计真实总数
+  const total = walkStats ? walkStats.total : files.length
   const truncated = total > SCAN_MAX_TRACKS
-  const limited = files.slice(0, SCAN_MAX_TRACKS)
+  const limited = files
   const lrcSets = await buildLrcSets([...new Set(limited.map((f) => path.dirname(f)))])
   const hasLrcFor = (f) => {
     const set = lrcSets.get(path.dirname(f))
@@ -357,20 +366,33 @@ ipcMain.handle('lyrics:get', async (_e, filePath) => {
 })
 
 
-// ---------- 封面（带缓存，按需取） ----------
+// ---------- 封面（带 LRU 容量上限缓存，按需取） ----------
+const MAX_COVER_CACHE = 240
 const coverCache = new Map()
+function setCoverCache(k, v) {
+  if (coverCache.has(k)) coverCache.delete(k)
+  else if (coverCache.size >= MAX_COVER_CACHE) {
+    const oldest = coverCache.keys().next().value
+    if (oldest !== undefined) coverCache.delete(oldest)
+  }
+  coverCache.set(k, v)
+}
 const fileUrl = (p) => 'file:///' + encodeURI(String(p).replace(/\\/g, '/'))
 
 ipcMain.handle('cover:get', async (_e, filePath) => {
   try { verifyIpc(_e) } catch { return '' }
   // 越界路径按“无封面”处理，不泄露路径信息
   try { filePath = assertInsideLibrary(filePath) } catch { return '' }
-  if (coverCache.has(filePath)) return coverCache.get(filePath)
+  if (coverCache.has(filePath)) {
+    const hit = coverCache.get(filePath)
+    setCoverCache(filePath, hit)
+    return hit
+  }
   // 优先用侧车高清封面（下载时写的 .jpg）
   const sideCover = filePath.replace(/\.[^.]+$/, '') + '.jpg'
   if (fs.existsSync(sideCover) && isInsideLibrary(sideCover)) { // 侧车封面是库外符号链接时不跟随读取
     const u = fileUrl(sideCover)
-    coverCache.set(filePath, u)
+    setCoverCache(filePath, u)
     return u
   }
   let url = ''
@@ -383,7 +405,7 @@ ipcMain.handle('cover:get', async (_e, filePath) => {
       url = `data:${pic.format || 'image/jpeg'};base64,${b64}`
     }
   } catch { /* 忽略 */ }
-  coverCache.set(filePath, url)
+  setCoverCache(filePath, url)
   return url
 })
 
@@ -411,11 +433,12 @@ ipcMain.handle('lyrics:auto', async (_e, { title, artist, filePath }) => {
     verifyIpc(_e)
     const r = await netapi.autoLyric({ title, artist })
     if (!r.ok) return { ok: false, reason: r.reason }
-    // 写旁挂歌词，下次直接命中
+    // 写旁挂歌词，下次直接命中（同时对派生 .lrc 目标做防符号链接校验）
     if (filePath) {
       let side = ''
       try {
-        side = assertInsideLibrary(filePath).replace(/\.[^.]+$/, '') + '.lrc'
+        const checkedAudio = assertInsideLibrary(filePath)
+        side = assertSafeWriteTarget(checkedAudio.replace(/\.[^.]+$/, '') + '.lrc')
       } catch {
         return { ok: false, reason: 'PATH_OUTSIDE_LIBRARY：路径不在曲库授权目录内' }
       }
@@ -490,13 +513,15 @@ ipcMain.handle('lib:coverFix', async (_e, tracks) => {
   let done = 0, skipped = 0
   const errors = []
   for (const t of list) {
-    // 越界曲目不写盘，记入 errors（不中断其余曲目）
-    let trackPath = ''
-    try { trackPath = assertInsideLibrary(t.path) } catch {
+    // 越界曲目或派生 .jpg 为符号链接时不写盘，记入 errors（不中断其余曲目）
+    let side = ''
+    try {
+      const trackPath = assertInsideLibrary(t.path)
+      side = assertSafeWriteTarget(trackPath.replace(/\.[^.]+$/, '') + '.jpg')
+    } catch {
       errors.push({ name: t.title || t.path, reason: 'PATH_OUTSIDE_LIBRARY：路径不在曲库授权目录内' })
       continue
     }
-    const side = trackPath.replace(/\.[^.]+$/, '') + '.jpg'
     if (fs.existsSync(side)) { skipped++; continue }
     try {
       const buf = await netapi.coverBuffer({ name: t.title, artist: t.artist, cover: t.cover })
