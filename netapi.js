@@ -8,7 +8,18 @@ const fsp = fs.promises
 const net = require('net')
 const http = require('http')
 const https = require('https')
-const { app } = require('electron')
+// Electron 只在应用内可用；测试时用 plain node 直接 require 本模块，
+// 此时 require('electron') 不存在（或只返回二进制路径字符串，无 app 对象），
+// 用一个最小的 app 桩代替，让 log() 等用到 app.getPath 的地方不至于在加载期
+// 乃至测试中抛错。在真正的 Electron 运行时走的仍是原来的 electron.app，行为不变。
+let app = null
+try {
+  const electron = require('electron')
+  app = electron && electron.app
+} catch { /* plain node：无 Electron，用下面的桩 */ }
+if (!app || typeof app.getPath !== 'function') {
+  app = { getPath: () => require('os').tmpdir() }
+}
 
 let ncmPort = 0
 let bootPromise = null
@@ -586,5 +597,13 @@ module.exports = {
   hiResCover,
   lyric,
   downloadVoice,
+  // 以下仅为可测试性导出（第 8 项自动化测试用），不改任何行为：
+  // downloadTo / mergeLrc / parseTime / sanitize / findFreePort 原先未导出，
+  // plain node 测试无法直接调用。
+  downloadTo,
+  mergeLrc,
+  parseTime,
+  sanitize,
+  findFreePort,
   getPort: () => ncmPort,
 }

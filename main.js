@@ -31,6 +31,7 @@ app.commandLine.appendSwitch('disable-gpu-sandbox')
 })()
 
 const netapi = require('./netapi')
+const { parseLrc } = require('./lib/lrc')
 
 const AUDIO_EXT = new Set(['.mp3', '.flac', '.wav', '.ogg', '.m4a', '.aac', '.opus'])
 const DEFAULT_ROOT = process.env.MUSIC_ROOT ||
@@ -102,28 +103,7 @@ async function walk(dir, out, depth = 0) {
 }
 
 // ---------- LRC 解析：同时间戳（±30ms）相邻两行 → 原文/译文配对 ----------
-function parseLrc(text) {
-  const rows = []
-  for (const raw of text.split(/\r?\n/)) {
-    const m = raw.match(/^\s*\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]\s*(.*)$/)
-    if (!m) continue
-    const ms = (+m[1]) * 60000 + (+m[2]) * 1000 + (m[3] ? +m[3].padEnd(2, '0').slice(0, 2) * 10 : 0)
-    const body = m[4].trim()
-    if (body) rows.push({ t: ms, text: body })
-  }
-  rows.sort((a, b) => a.t - b.t)
-  const out = []
-  for (const r of rows) {
-    const prev = out[out.length - 1]
-    if (prev && Math.abs(prev.t - r.t) <= 30) {
-      prev.pair = prev.pair || [prev.text]
-      prev.pair.push(r.text)
-    } else {
-      out.push({ t: r.t, text: r.text, pair: null })
-    }
-  }
-  return out
-}
+// 实现在 lib/lrc.js（纯函数，可在 plain node 里测试），此处只引用，不改行为。
 
 ipcMain.handle('library:scan', async (_e, dir) => {
   if (!dir) loadUserConfig()
