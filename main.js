@@ -31,6 +31,67 @@ const fsp = fs.promises
 const netapi = require('./netapi')
 
 const AUDIO_EXT = new Set(['.mp3', '.flac', '.wav', '.ogg', '.m4a', '.aac', '.opus'])
+// ---------- 曲库扫描性能（P1-4）：有限并发 + 增量缓存 + 进度/取消 ----------
+// SCAN_CONCURRENCY = 4：music-metadata 的 parseFile 以磁盘 I/O + 标签解码为主，
+// 4 路并行已能填满磁盘顺序读的空闲；再高（8+）在机械硬盘 / 低配机上只会加剧
+// 随机 I/O 与内存占用（每路各持一份解析缓冲），收益递减且可能拖慢前台播放。
+// 如需调优只改这一个常量。
+const SCAN_CONCURRENCY = 4
+const SCAN_MAX_TRACKS = 5000
+const SCAN_CACHE_FILE = 'scan-cache.json'
+const SCAN_CACHE_VERSION = 1
+// 由渲染层“取消”按钮经 'library:scan-cancel' 置位；扫描在每批处理间隙检查。
+let scanCancelRequested = false
+
+function scanCachePath() {
+  return path.join(app.getPath('userData'), SCAN_CACHE_FILE)
+}
+// 增量缓存：{ [绝对路径]: { size, mtimeMs, title, artist, album, duration, bitrate, hasLrc } }
+// 读写失败一律降级为空缓存 / 跳过写盘，绝不因此让扫描失败。
+function loadScanCache() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(scanCachePath(), 'utf8'))
+    if (raw && raw.version === SCAN_CACHE_VERSION && raw.entries && typeof raw.entries === 'object') return raw.entries
+  } catch { /* 缓存损坏或不存在：全量扫描 */ }
+  return {}
+}
+function saveScanCache(entries) {
+  try {
+    fs.mkdirSync(path.dirname(scanCachePath()), { recursive: true })
+    fs.writeFileSync(scanCachePath(), JSON.stringify({ version: SCAN_CACHE_VERSION, updatedAt: Date.now(), entries }, null, 2), 'utf8')
+  } catch { /* 写缓存失败不影响本次扫描结果 */ }
+}
+
+// 有限并发任务队列（手写，不引入新依赖）：limit 个 worker 各自取下一个任务，
+// 绝不无上限 Promise.all。shouldStop 由调用方提供，在取下一个任务前检查。
+async function runLimited(items, limit, worker, shouldStop) {
+  let next = 0
+  const runners = Array.from({ length: Math.max(0, Math.min(limit, items.length)) }, async () => {
+    while (next < items.length) {
+      if (shouldStop && shouldStop()) return
+      const item = items[next++]
+      try { await worker(item) } catch { /* 单个任务失败不中断整批 */ }
+    }
+  })
+  await Promise.all(runners)
+}
+
+// hasLrc 批量比对：每个目录只 readdir 一次，收集全部 .lrc 的“去扩展名小写”集合；
+// 某目录 readdir 失败时对该目录回退为逐首 fs.existsSync。
+async function buildLrcSets(dirs) {
+  const map = new Map()
+  for (const dir of dirs) {
+    try {
+      const names = await fsp.readdir(dir)
+      const set = new Set()
+      for (const n of names) {
+        if (path.extname(n).toLowerCase() === '.lrc') set.add(path.basename(n, '.lrc').toLowerCase())
+      }
+      map.set(dir, set)
+    } catch { /* 该目录缺失比对集合，调用方回退 existsSync */ }
+  }
+  return map
+}
 // 默认曲库：优先 MUSIC_ROOT 环境变量，否则用系统音乐目录。
 // 此前这里是作者本机绝对路径，已移除：新安装不应默认指向
 // 一个不存在的个人目录，否则首次启动会静默空库。已有 user-config.json
@@ -217,11 +278,45 @@ ipcMain.handle('library:scan', async (_e, dir) => {
   root = target
   authorizeDir(target)
   if (dir) saveUserConfig({ root: target })
+  scanCancelRequested = false
+  const sender = _e && _e.sender
+  const sendProgress = (p) => {
+    try { if (sender && !sender.isDestroyed()) sender.send('library:scan-progress', p) } catch { /* 渲染进程已关不影响扫描 */ }
+  }
   const files = []
   await walk(target, files)
+  // 不再静默截断：仍只返回前 5000 首（渲染层一次承载上限不变），但把总数与
+  // 截断标志一并返回，渲染层据此提示用户。
+  const total = files.length
+  const truncated = total > SCAN_MAX_TRACKS
+  const limited = files.slice(0, SCAN_MAX_TRACKS)
+  const lrcSets = await buildLrcSets([...new Set(limited.map((f) => path.dirname(f)))])
+  const hasLrcFor = (f) => {
+    const set = lrcSets.get(path.dirname(f))
+    if (set) return set.has(path.basename(f, path.extname(f)).toLowerCase())
+    const lrcPath = path.join(path.dirname(f), path.basename(f, path.extname(f)) + '.lrc')
+    return fs.existsSync(lrcPath)
+  }
+  const cache = loadScanCache()
   const mm = await mmModule().catch(() => null)
   const tracks = []
-  for (const f of files.slice(0, 5000)) {
+  const newCache = {}
+  let done = 0
+  let lastSent = 0
+  const emitProgress = () => {
+    lastSent = done
+    sendProgress({ phase: 'parse', done, total: limited.length, totalFiles: total, cancelled: scanCancelRequested })
+  }
+  const parseOne = async (f) => {
+    let stat = null
+    try { stat = await fsp.stat(f) } catch { /* 取不到 stat 时按缓存未命中处理 */ }
+    const hasLrc = hasLrcFor(f)
+    // 缓存命中：(path, size, mtimeMs) 全一致才复用，直接跳过 parseFile。
+    if (stat && cache[f] && cache[f].size === stat.size && cache[f].mtimeMs === stat.mtimeMs) {
+      const c = cache[f]
+      newCache[f] = { size: stat.size, mtimeMs: stat.mtimeMs, title: c.title, artist: c.artist, album: c.album, duration: c.duration, bitrate: c.bitrate, hasLrc }
+      return { path: f, title: c.title, artist: c.artist, album: c.album, duration: c.duration, bitrate: c.bitrate, hasLrc }
+    }
     let title = path.basename(f, path.extname(f))
     let artist = '', album = '', duration = 0, bitrate = 0
     if (mm) {
@@ -239,12 +334,26 @@ ipcMain.handle('library:scan', async (_e, dir) => {
       const g = parseName(path.basename(f, path.extname(f)))
       if (g.artist) { title = g.title; artist = g.artist }
     }
-    const lrcPath = path.join(path.dirname(f), path.basename(f, path.extname(f)) + '.lrc')
-    tracks.push({ path: f, title, artist, album, duration, bitrate, hasLrc: fs.existsSync(lrcPath) })
+    if (stat) newCache[f] = { size: stat.size, mtimeMs: stat.mtimeMs, title, artist, album, duration, bitrate, hasLrc }
+    return { path: f, title, artist, album, duration, bitrate, hasLrc }
   }
+  // 有限并发解析；每完成一批（每 10 首或全部完成）推送一次真实进度。
+  // 取消只在取下一个任务前检查：在途的最多 SCAN_CONCURRENCY 首会跑完当前解析。
+  await runLimited(limited, SCAN_CONCURRENCY, async (f) => {
+    const t = await parseOne(f)
+    if (t) tracks.push(t)
+    done++
+    if (done - lastSent >= 10 || done === limited.length) emitProgress()
+  }, () => scanCancelRequested)
+  if (scanCancelRequested) emitProgress()
+  // 只保留本次扫描到的文件条目（已删除文件的旧缓存随之丢弃，避免缓存文件无界增长）；
+  // 取消时只保存已处理部分的条目，未处理文件下次重新解析。
+  saveScanCache(newCache)
   tracks.sort((a, b) => a.title.localeCompare(b.title, 'zh'))
-  return { root: target, tracks }
+  return { root: target, tracks, total, truncated, cancelled: scanCancelRequested }
 })
+
+ipcMain.on('library:scan-cancel', () => { scanCancelRequested = true })
 
 ipcMain.handle('lyrics:get', async (_e, filePath) => {
   // 越界路径按“无歌词”处理，不泄露路径信息

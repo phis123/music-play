@@ -1408,11 +1408,28 @@ async function toggleFav(t) {
   render()
 }
 
+// 扫描进度只订阅一次：主进程经 'library:scan-progress' 推送已处理数/总数，
+// 这里据此更新任务条的真实进度（总数在 walk 完成后才知道，之前为不确定进度）。
+let _scanProgressBound = false
+function bindScanProgress() {
+  if (_scanProgressBound || !window.api || !window.api.onScanProgress) return
+  _scanProgressBound = true
+  window.api.onScanProgress((p) => {
+    const tk = state.task
+    if (!p || tk.kind !== 'scan' || !tk.active) return
+    if (p.total) { tk.total = p.total; tk.indet = false }
+    stepTask(p.done || 0, `正在读取音频文件与 ID3 标签 (${p.done || 0}/${p.total || '?'})…`)
+  })
+}
+
 async function rescan(showFeedback) {
   const prevCount = state.tracks.length
   if (showFeedback) {
-    startTask('scan', '正在扫描本地音乐目录…', `正在遍历 ${state.root || '默认音乐目录'}`, 2, false)
-    stepTask(1, `正在读取音频文件与 ID3 标签 (${state.root || ''})…`)
+    bindScanProgress()
+    // 总数未知（walk 尚未完成），先用不确定进度 + “取消”按钮；收到第一条
+    // library:scan-progress 后总数与进度条由 bindScanProgress 接管。
+    startTask('scan', '正在扫描本地音乐目录…', `正在遍历 ${state.root || '默认音乐目录'}`, 0, true, '取消')
+    stepTask(0, `正在读取音频文件与 ID3 标签 (${state.root || ''})…`)
   }
   try {
     const lib = await window.api.scan(state.root)
@@ -1421,10 +1438,18 @@ async function rescan(showFeedback) {
     if (showFeedback) {
       const diff = state.tracks.length - prevCount
       const diffTxt = diff > 0 ? `新增 ${diff} 首` : diff < 0 ? `减少 ${Math.abs(diff)} 首` : '曲目数量无变化'
-      if (!state.tracks.length) {
+      const truncTxt = lib.truncated
+        ? ` · 曲库共 ${lib.total} 首，仅显示前 ${state.tracks.length} 首`
+        : ''
+      if (lib.cancelled) {
+        finishTask(`本地音乐扫描已取消（已载入 ${state.tracks.length} 首）`, `${diffTxt} · 目录：${state.root}`, 4200)
+      } else if (!state.tracks.length) {
         recordTaskError(state.root || '音乐目录', '该目录下未扫描到支持的音频文件 (.mp3/.flac/.m4a/.wav/.ogg)')
+        finishTask('本地音乐扫描完成（共 0 首）', `${diffTxt} · 目录：${state.root}`, 4200)
+      } else {
+        finishTask(`本地音乐扫描完成（共 ${state.tracks.length} 首${lib.total != null && lib.total !== state.tracks.length ? ` / 全部 ${lib.total} 首` : ''}）`, `${diffTxt}${truncTxt} · 目录：${state.root}`, 4200)
+        if (lib.truncated) toast(`曲库共 ${lib.total} 首，仅显示前 ${state.tracks.length} 首`)
       }
-      finishTask(`本地音乐扫描完成（共 ${state.tracks.length} 首）`, `${diffTxt} · 目录：${state.root}`, 4200)
     }
   } catch (e) {
     if (showFeedback) {
@@ -2878,7 +2903,8 @@ function bindGlobal() {
       dismissTask()
     } else if (e.target.closest('[data-task-stop]')) {
       const k = state.task.kind
-      if (k === 'cover') window.__deskCoverStop = true
+      if (k === 'scan') { if (window.api && window.api.cancelScan) window.api.cancelScan() }
+      else if (k === 'cover') window.__deskCoverStop = true
       else if (k === 'healthfix') window.__deskHealthStop = true
       else if (k === 'impmatch') window.__deskImpMatchStop = true
       else if (k === 'impdl') window.__deskImpStop = true

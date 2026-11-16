@@ -2,6 +2,8 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('api', {
   scan: (dir) => ipcRenderer.invoke('library:scan', dir),
+  cancelScan: () => ipcRenderer.send('library:scan-cancel'),
+  onScanProgress: (cb) => ipcRenderer.on('library:scan-progress', (_e, p) => cb(p)),
   lyrics: (filePath) => ipcRenderer.invoke('lyrics:get', filePath),
   cover: (filePath) => ipcRenderer.invoke('cover:get', filePath),
   pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
