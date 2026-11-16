@@ -23,13 +23,37 @@ public class AudioStore {
             ".mp3", ".flac", ".m4a", ".wav", ".ogg", ".aac", ".opus", ".wma", ".ape"
     };
 
-    /** 固定曲库根目录：/sdcard/Music/music-play */
+    private static String customRootPath = null;
+
+    /** 默认曲库根目录：/sdcard/Music/music-play（支持用户在设置中切换子目录或自定义路径） */
     public static File rootDir() {
+        if (customRootPath != null && !customRootPath.trim().isEmpty()) {
+            File custom = new File(customRootPath.trim());
+            if (!custom.exists()) custom.mkdirs();
+            if (custom.exists() && custom.isDirectory()) return custom;
+        }
         File base = android.os.Environment.getExternalStoragePublicDirectory(
                 android.os.Environment.DIRECTORY_MUSIC);
         File d = new File(base, "music-play");
         if (!d.exists()) d.mkdirs();
         return d;
+    }
+
+    public static boolean setCustomRootDir(String pathOrSub) {
+        if (pathOrSub == null || pathOrSub.trim().isEmpty()) {
+            customRootPath = null;
+            return true;
+        }
+        String s = pathOrSub.trim();
+        File base = android.os.Environment.getExternalStoragePublicDirectory(
+                android.os.Environment.DIRECTORY_MUSIC);
+        File target = s.startsWith("/") ? new File(s) : new File(base, s);
+        if (!target.exists()) target.mkdirs();
+        if (target.exists() && target.isDirectory()) {
+            customRootPath = target.getAbsolutePath();
+            return true;
+        }
+        return false;
     }
 
     private static boolean isAudio(String name) {

@@ -25,6 +25,8 @@ public class LyricsOverlay {
     private WindowManager.LayoutParams lp;
     private boolean locked = false;
     private int color = 0xFFFFFFFF;
+    private int fontSizeSp = 18;
+    private int bgAlpha = 0; // 0 ~ 220
 
     private LyricsOverlay(Context c) {
         this.ctx = c.getApplicationContext();
@@ -145,9 +147,32 @@ public class LyricsOverlay {
         applyColor();
     }
 
+    public void setStyle(int c, int sizeSp, int alpha) {
+        color = c;
+        fontSizeSp = Math.max(12, Math.min(30, sizeSp));
+        bgAlpha = Math.max(0, Math.min(220, alpha));
+        applyColor();
+    }
+
     private void applyColor() {
-        if (line1 != null) line1.setTextColor(color);
-        if (line2 != null) line2.setTextColor((color & 0x00FFFFFF) | 0xCC000000);
+        if (line1 != null) {
+            line1.setTextColor(color);
+            line1.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSizeSp);
+        }
+        if (line2 != null) {
+            line2.setTextColor((color & 0x00FFFFFF) | 0xCC000000);
+            line2.setTextSize(TypedValue.COMPLEX_UNIT_SP, Math.max(11, fontSizeSp - 4));
+        }
+        if (root != null) {
+            if (bgAlpha <= 0) {
+                root.setBackgroundColor(0x00000000);
+            } else {
+                android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
+                gd.setColor((bgAlpha << 24) | 0x00121318);
+                gd.setCornerRadius(dp(12));
+                root.setBackground(gd);
+            }
+        }
     }
 
     public void hide() {

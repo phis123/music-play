@@ -34,6 +34,8 @@ public class PlaybackService extends Service {
     private static AudioManager am;
 
     private MediaPlayer mp;
+    private android.media.audiofx.LoudnessEnhancer loudnessEnhancer = null;
+    private float currentGainDb = 0f;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private String curTitle = "", curArtist = "", curPath = "", coverUrl = "";
     private Bitmap coverBmp = null;
@@ -297,6 +299,7 @@ public class PlaybackService extends Service {
             mp.reset();
             mp.setDataSource(url);
             mp.prepare();
+            applyGainInternal();
             mp.start();
             playing = true;
             durSec = mp.getDuration() / 1000;
@@ -366,10 +369,47 @@ public class PlaybackService extends Service {
             try { if (mp != null) mp.setVolume(0.2f, 0.2f); ducked = true; } catch (Exception ignored) { }
         } else if (change == AudioManager.AUDIOFOCUS_GAIN) {
             if (ducked) {
-                try { if (mp != null) mp.setVolume(1f, 1f); } catch (Exception ignored) { }
                 ducked = false;
+                applyGainInternal();
             }
         }
+    }
+
+    public void setGainDb(float gainDb) {
+        this.currentGainDb = Math.max(-15f, Math.min(15f, gainDb));
+        applyGainInternal();
+    }
+
+    private void applyGainInternal() {
+        if (mp == null) return;
+        if (ducked) {
+            try { mp.setVolume(0.2f, 0.2f); } catch (Exception ignored) { }
+            return;
+        }
+        try {
+            if (currentGainDb <= 0f) {
+                float linear = (float) Math.pow(10.0, currentGainDb / 20.0);
+                if (linear < 0.05f) linear = 0.05f;
+                if (linear > 1.0f) linear = 1.0f;
+                mp.setVolume(linear, linear);
+                if (loudnessEnhancer != null) {
+                    try {
+                        loudnessEnhancer.setTargetGain(0);
+                        loudnessEnhancer.setEnabled(false);
+                    } catch (Throwable ignored) { }
+                }
+            } else {
+                mp.setVolume(1.0f, 1.0f);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                    if (loudnessEnhancer == null) {
+                        loudnessEnhancer = new android.media.audiofx.LoudnessEnhancer(mp.getAudioSessionId());
+                    }
+                    int targetMb = Math.round(currentGainDb * 100f); // 1 dB = 100 mB
+                    loudnessEnhancer.setTargetGain(targetMb);
+                    loudnessEnhancer.setEnabled(true);
+                }
+            }
+        } catch (Throwable ignored) { }
     }
 
     // ---------------- ticker ----------------
@@ -413,6 +453,7 @@ public class PlaybackService extends Service {
     @Override
     public void onDestroy() {
         stopTicker();
+        try { if (loudnessEnhancer != null) { loudnessEnhancer.release(); loudnessEnhancer = null; } } catch (Throwable ignored) { }
         try { if (mp != null) { mp.release(); mp = null; } } catch (Exception ignored) { }
         if (session != null) { session.setActive(false); session.release(); session = null; }
         if (am != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && focusReq != null) {

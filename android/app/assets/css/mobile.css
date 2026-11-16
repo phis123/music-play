@@ -393,9 +393,9 @@ input { font-family: inherit; }
   .np-lyrics { flex: 1 1 auto; width: auto; max-width: 660px; height: 100%; text-align: left;
     padding: 6px 26px 18vh 22px; overflow-x: hidden; }
   /* 高亮行用字号+字重，不用 transform: scale（scale 会把行撑出容器，左侧被 overflow 裁掉一截） */
-  .np-line.cur { transform: none; font-size: 19px; font-weight: 800; }
-  .np-line.cur.tr { font-size: 15px; }
-  .np-line { font-size: 18px; }
+  .np-line.cur { transform: none; font-size: calc(var(--lrc-size, 18px) + 2px); font-weight: 800; }
+  .np-line.cur.tr { font-size: calc(var(--lrc-size, 18px) - 1px); }
+  .np-line { font-size: var(--lrc-size, 18px); }
   .np-foot { max-width: 820px; }
   .search-hint { font-size: 13px; }
   .mini { width: 400px; }
@@ -487,12 +487,12 @@ dialog.sheet-dlg.open .sheet { transform: none; }
 .np-resume.hidden { opacity: 0; pointer-events: none; transform: translateY(8px); }
 
 /* 歌词远近阶梯层次 */
-.np-line { cursor: pointer; border-radius: 10px; padding: 8px 10px; transition: color .22s, font-size .22s, opacity .22s, background .15s; }
+.np-line { cursor: pointer; border-radius: 10px; padding: 8px 10px; font-size: var(--lrc-size, 17px); transition: color .22s, font-size .22s, opacity .22s, background .15s; }
 .np-line:active { background: rgba(0,0,0,.05); }
 .np-line.near { color: var(--text-2); opacity: .88; }
 .np-line.far { opacity: .48; }
-.np-line.cur { opacity: 1; color: var(--red); font-weight: 800; }
-.np-line.cur.tr { opacity: .95; color: var(--text); font-weight: 650; }
+.np-line.cur { opacity: 1; color: var(--lrc-accent, var(--red)); font-size: calc(var(--lrc-size, 17px) + 2px); font-weight: 800; }
+.np-line.cur.tr { opacity: .95; color: var(--lrc-accent, var(--text)); font-size: calc(var(--lrc-size, 17px) - 1px); font-weight: 650; }
 
 /* 播放页底部曲目信息 + 快捷动作栏（喜欢 / 换声源 / 加歌单） */
 .np-meta-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
@@ -760,6 +760,58 @@ dialog.sheet-dlg.open .sheet { transform: none; }
 .imp-inline-in:focus { border-color: var(--red); }
 .imp-inline-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
 .imp-cands-scroll { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 4px; }
+
+/* ===================== b74：安卓独立主设置界面 + 播放页调音与歌词小设置抽屉 ===================== */
+.set-wrap { max-width: 820px; margin: 0 auto 24px; display: flex; flex-direction: column; gap: 12px; }
+.set-card {
+  padding: 15px 16px; border-radius: 16px;
+  background: var(--side); border: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.set-card-title { font-size: 14.5px; font-weight: 750; color: var(--text); }
+.set-card-desc { font-size: 11.5px; color: var(--dim); margin-top: 2px; }
+.set-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding-top: 10px; border-top: 1px solid var(--line);
+}
+.set-row:first-of-type { padding-top: 2px; border-top: 0; }
+.set-row-main { flex: 1; min-width: 180px; }
+.set-row-label { font-size: 13.5px; font-weight: 650; color: var(--text); }
+.set-row-sub { font-size: 11.5px; color: var(--dim); margin-top: 2px; word-break: break-all; }
+.set-row-ctrl { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.set-seg {
+  display: inline-flex; align-items: center; padding: 3px; border-radius: 999px;
+  background: var(--bg); border: 1px solid var(--line); gap: 2px; flex-wrap: wrap;
+}
+.set-seg button {
+  padding: 5px 11px; border-radius: 999px; font-size: 11.5px; font-weight: 650;
+  color: var(--dim); background: transparent;
+}
+.set-seg button.on { background: var(--red); color: #fff; }
+.set-swatches { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.set-swatch {
+  width: 24px; height: 24px; border-radius: 50%;
+  border: 2px solid rgba(128,128,140,.35); display: inline-block;
+}
+.set-swatch.on { border-color: var(--text); box-shadow: 0 0 0 2px var(--red-soft); transform: scale(1.1); }
+.set-preview-box {
+  padding: 12px 14px; border-radius: 12px; background: var(--bg); border: 1px dashed var(--line);
+  text-align: center;
+}
+.npset-sec { display: flex; flex-direction: column; gap: 8px; padding: 10px 0; border-top: 1px solid var(--line); }
+.npset-sec:first-of-type { border-top: 0; padding-top: 2px; }
+.npset-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.npset-title { font-size: 13.5px; font-weight: 750; color: var(--text); }
+.npset-sub { font-size: 11.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.npset-row { display: flex; align-items: center; gap: 10px; }
+.npset-row input[type=range] { flex: 1; accent-color: var(--red); }
+.npset-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.npset-chip {
+  padding: 5px 10px; border-radius: 8px; font-size: 11.5px; font-weight: 650;
+  background: var(--side); color: var(--text-2); border: 1px solid var(--line);
+}
+.npset-chip.on { background: var(--red-soft); color: var(--red); border-color: rgba(236,65,65,.35); }
+
 
 
 

@@ -64,17 +64,11 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5v10"/><path d="M8.2 10.8 12 14.6l3.8-3.8"/><path d="M4.8 18.5h14.4"/></svg>
         <span>批量导入</span>
       </button>
-      <button class="rail-item" data-go="health">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>
-        <span>曲库体检</span>
+      <button class="rail-item" data-go="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>设置</span>
       </button>
     </nav>
-    <div class="rail-foot">
-      <button class="rail-theme-btn" id="railThemeBtn" title="切换外观主题">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
-        <span id="railThemeLabel">外观：跟随系统</span>
-      </button>
-    </div>
   </aside>
 
   <!-- 主内容 -->
@@ -110,6 +104,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.4" r="3.6"/><path d="M4.8 20c.6-3.7 3.6-5.6 7.2-5.6s6.6 1.9 7.2 5.6"/></svg>
       <span>个人</span>
     </button>
+    <button class="tab" data-go="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <span>设置</span>
+    </button>
   </nav>
 </div>
 
@@ -125,13 +123,8 @@
       <div class="np-headtitle" id="npHeadTitle">正在播放</div>
       <div class="np-headsub" id="npHeadSub">本地曲库</div>
     </div>
-    <button class="np-off" id="npFloat" title="悬浮歌词">浮词</button>
-    <button class="np-off" id="npLock" title="锁定/解锁悬浮歌词">锁</button>
-    <span class="np-offgrp">
-      <button class="np-off" id="npOffDn" aria-label="歌词提前">−</button>
-      <button class="np-off" id="npOffset" title="歌词偏移">0.0s</button>
-      <button class="np-off" id="npOffUp" aria-label="歌词延后">＋</button>
-    </span>
+    <button class="np-off" id="npGainChip" title="当前生效音量平衡补偿">均衡 0.0dB</button>
+    <button class="np-off" id="npGearBtn" title="本曲设置（单曲声音平衡 / 歌词延迟 / 悬浮歌词设计）">⚙ 播放设置</button>
   </div>
   <div class="np-body">
     <div class="np-stage-wrap">
@@ -165,6 +158,9 @@
         </button>
         <button class="np-act-btn" id="npAddPl" aria-label="加入歌单" title="加入歌单">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <button class="np-act-btn" id="npMiniSetBtn" aria-label="本曲调音与歌词设置" title="单曲声音平衡 / 歌词延迟 / 悬浮歌词">
+          <span>⚙ 调音</span>
         </button>
       </div>
     </div>
