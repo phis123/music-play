@@ -5,8 +5,6 @@ const fs = require('fs')
 const fsp = fs.promises
 
 // 兼容受管目录 / 低完整性级别启动：若默认 %APPDATA%\music-play 不可写，自动回退到程序旁 userdata 目录
-app.commandLine.appendSwitch('no-sandbox')
-app.commandLine.appendSwitch('disable-gpu-sandbox')
 ;(function ensureWritablePaths() {
   try {
     const defDir = app.getPath('userData')
@@ -434,6 +432,7 @@ function createFloatWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   })
   try { if (!tray) createTray() } catch { }
@@ -492,6 +491,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   })
   win.setMenuBarVisibility(false)
