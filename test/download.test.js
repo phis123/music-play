@@ -95,7 +95,7 @@ test('空 body 的 200：resolve { bytes: 0 }，落盘空文件', async (t) => {
 // ——因为缺少 res.on('error') 且 finish 时从不比较 got/total（核实报告 §5）。
 // 直接取消 skip 会让测试套件挂起，所以先用 test.skip 占位；第 5 项 patch
 // （失败清理 + got/total 校验 + res.on('error')）合并后再取消 skip。
-test.skip('截断响应：reject，且不残留半截文件（待第 5 项）', async (t) => {
+test('截断响应：reject，且不残留半截文件（第 5 项已启用）', async (t) => {
   const dir = tmpDir(t)
   const base = await serve(t, (_req, res) => {
     res.writeHead(200, { 'content-length': 10 })
@@ -107,7 +107,7 @@ test.skip('截断响应：reject，且不残留半截文件（待第 5 项）', 
   assert.equal(fs.existsSync(file), false, '失败后不应残留半截文件')
 })
 
-test.skip('中途断开：reject，且不残留半截文件（待第 5 项）', async (t) => {
+test('中途断开：reject，且不残留半截文件（第 5 项已启用）', async (t) => {
   const dir = tmpDir(t)
   const base = await serve(t, (_req, res) => {
     res.writeHead(200, { 'content-length': 100 })

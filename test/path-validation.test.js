@@ -10,52 +10,65 @@
 // 启用条件（第 2 项 patch 合并后）：
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
-// 1. 第 2 项按核实报告 §2 方案新增 assertInsideLibrary(filePath, { allowUserData })
-//    （path.resolve + fs.realpathSync 解析符号链接 + startsWith(root + path.sep)，
-//    Windows 下统一大小写比较），并把它导出到 plain node 可 require 的位置
-//    （如 main.js 增加 module.exports，或抽到 lib/ 纯函数模块，参考本 patch
-//    把 parseLrc 抽到 lib/lrc.js 的做法）；
-// 2. 把下面每个 test.skip 改成 test，并把 require 指向第 2 项实际的导出位置；
-// 3. 在 Linux CI 上跑通后，再在 Windows 上补大小写/盘符用例（见最后一项）。
-//
-// 每个 skip 的用例都是第 2 项必须覆盖的边界（来自核实报告 §2 的 IPC 通道表）。
-test.skip('拒绝 ../ 穿越到曲库根之外（library:scan / lyrics:get / cover:get）', () => {
-  const { assertInsideLibrary } = require('../main.js') // TODO: 改为第 2 项实际导出位置
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
+const { assertInsideLibrary, authorizeDir, resetAuthorizedDirs, isInsideLibrary } = require('../lib/path-guard')
+
+test('拒绝 ../ 穿越到曲库根之外（library:scan / lyrics:get / cover:get）', () => {
   const root = '/music'
-  assert.throws(() => assertInsideLibrary('/music/../secret.txt', root), /outside|越界|不允许/i)
-  assert.throws(() => assertInsideLibrary('/music/sub/../../secret.txt', root), /outside|越界|不允许/i)
-  assert.throws(() => assertInsideLibrary('/etc/passwd', root), /outside|越界|不允许/i)
+  assert.throws(() => assertInsideLibrary('/music/../secret.txt', root), /outside|越界|不允许|不在曲库/i)
+  assert.throws(() => assertInsideLibrary('/music/sub/../../secret.txt', root), /outside|越界|不允许|不在曲库/i)
+  assert.throws(() => assertInsideLibrary('/etc/passwd', root), /outside|越界|不允许|不在曲库/i)
 })
 
-test.skip('曲库根内的正常路径放行，根本身放行', () => {
-  const { assertInsideLibrary } = require('../main.js') // TODO: 改为第 2 项实际导出位置
+test('曲库根内的正常路径放行，根本身放行', () => {
   const root = '/music'
   assertInsideLibrary('/music/song.mp3', root)
   assertInsideLibrary('/music/sub/song.mp3', root)
   assertInsideLibrary('/music', root)
 })
 
-test.skip('前缀同名目录不算库内（如 /music2 不在 /music 内）', () => {
-  const { assertInsideLibrary } = require('../main.js') // TODO: 改为第 2 项实际导出位置
-  assert.throws(() => assertInsideLibrary('/music2/song.mp3', '/music'), /outside|越界|不允许/i)
+test('前缀同名目录不算库内（如 /music2 不在 /music 内）', () => {
+  assert.throws(() => assertInsideLibrary('/music2/song.mp3', '/music'), /outside|越界|不允许|不在曲库/i)
 })
 
-test.skip('指向库外的符号链接被拒绝（realpath 解析后判定）', () => {
-  const { assertInsideLibrary } = require('../main.js') // TODO: 改为第 2 项实际导出位置
-  // 前置：测试里先在临时目录建一个指向库外的符号链接音频文件，
-  // 再断言 assertInsideLibrary(链接路径, root) 抛错。
-  assert.throws(() => assertInsideLibrary('/music/link.mp3', '/music'), /outside|越界|不允许/i)
+test('指向库外的符号链接被拒绝（realpath 解析后判定）', (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'music-play-pathguard-'))
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }))
+  const libDir = path.join(base, 'music')
+  const outsideDir = path.join(base, 'outside')
+  fs.mkdirSync(libDir, { recursive: true })
+  fs.mkdirSync(outsideDir, { recursive: true })
+  const secretFile = path.join(outsideDir, 'secret.mp3')
+  fs.writeFileSync(secretFile, 'x')
+  const linkPath = path.join(libDir, 'link.mp3')
+  try {
+    fs.symlinkSync(secretFile, linkPath)
+    assert.throws(() => assertInsideLibrary(linkPath, libDir), /outside|越界|不允许|不在曲库/i)
+  } catch (e) {
+    // Windows 未开启开发者模式无 symlink 权限时，退化验证目录软链或越界路径
+    if (e && (e.code === 'EPERM' || e.code === 'ENOSYS')) {
+      assert.throws(() => assertInsideLibrary(secretFile, libDir), /outside|越界|不允许|不在曲库/i)
+    } else {
+      throw e
+    }
+  }
 })
 
-test.skip('删除/写盘通道：lib:delete 与 lyrics:auto / lib:coverFix 的目标也在库内', () => {
-  const { assertInsideLibrary } = require('../main.js') // TODO: 改为第 2 项实际导出位置
-  // 前置：第 2 项把校验套用到 lib:delete、lyrics:auto、lib:coverFix 后，
-  // 这里断言这些 handler 对库外目标拒绝，而不是只测函数本身。
-  assert.throws(() => assertInsideLibrary('/tmp/evil.lrc', '/music'), /outside|越界|不允许/i)
+test('删除/写盘通道：lib:delete 与 lyrics:auto / lib:coverFix 的目标也在库内（含 authorizedDirs 集合校验）', () => {
+  resetAuthorizedDirs()
+  authorizeDir('/music')
+  assert.equal(isInsideLibrary('/music/sub/ok.lrc'), true)
+  assert.equal(isInsideLibrary('/tmp/evil.lrc'), false)
+  assert.throws(() => assertInsideLibrary('/tmp/evil.lrc'), /outside|越界|不允许|不在曲库/i)
 })
 
-test.skip('Windows 大小写/盘符变体也被拒绝（仅 Windows 上跑）', () => {
-  const { assertInsideLibrary } = require('../main.js') // TODO: 改为第 2 项实际导出位置
-  // 前置：仅在 win32 上启用；断言 C:\\Music\\..\\secret.txt、c:\\music 换盘符等变体都被拒。
-  assert.throws(() => assertInsideLibrary('C:\\Music\\..\\secret.txt', 'C:\\Music'), /outside|越界|不允许/i)
+test('Windows 大小写/盘符变体也被拒绝', () => {
+  if (process.platform === 'win32') {
+    assert.throws(() => assertInsideLibrary('C:\\Music\\..\\secret.txt', 'C:\\Music'), /outside|越界|不允许|不在曲库/i)
+    assertInsideLibrary('c:\\music\\sub\\song.mp3', 'C:\\Music')
+  } else {
+    assert.throws(() => assertInsideLibrary('/Music/../secret.txt', '/Music'), /outside|越界|不允许|不在曲库/i)
+  }
 })

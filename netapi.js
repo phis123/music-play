@@ -431,8 +431,11 @@ async function downloadVoiceOnce({ voice, song, target, file }) {
   try {
     await fsp.rename(tmpFile, file)
   } catch {
-    await fsp.copyFile(tmpFile, file)
-    try { await fsp.unlink(tmpFile) } catch { }
+    try {
+      await fsp.copyFile(tmpFile, file)
+    } finally {
+      try { await fsp.unlink(tmpFile) } catch { }
+    }
   }
 
   // 写标签：标题 / 作者 / 封面（用歌曲的）

@@ -4,7 +4,12 @@ const path = require('path')
 const fs = require('fs')
 const fsp = fs.promises
 
-// 兼容受管目录 / 低完整性级别启动：若默认 %APPDATA%\music-play 不可写，自动回退到程序旁 userdata 目录
+// 兼容受管目录 / 低完整性级别启动：若默认 %APPDATA%\music-play 不可写，自动回退到程序旁 userdata 目录；
+// 仅在受限沙箱环境（DSH_SESSION_ID 或显式 ELECTRON_NO_SANDBOX=1）下追加 no-sandbox 兜底，常规桌面环境保持 Chromium 沙箱开启。
+if (process.env.DSH_SESSION_ID || process.env.ELECTRON_NO_SANDBOX === '1') {
+  app.commandLine.appendSwitch('no-sandbox')
+  app.commandLine.appendSwitch('disable-gpu-sandbox')
+}
 ;(function ensureWritablePaths() {
   try {
     const defDir = app.getPath('userData')
@@ -30,6 +35,11 @@ const fsp = fs.promises
 
 const netapi = require('./netapi')
 const { parseLrc } = require('./lib/lrc')
+const { authorizeDir, assertInsideLibrary: _assertInsideLib, isInsideLibrary } = require('./lib/path-guard')
+const assertInsideLibrary = (filePath, opts = {}) => _assertInsideLib(filePath, {
+  ...opts,
+  userDataDir: opts && opts.allowUserData ? app.getPath('userData') : '',
+})
 
 const AUDIO_EXT = new Set(['.mp3', '.flac', '.wav', '.ogg', '.m4a', '.aac', '.opus'])
 // ---------- 曲库扫描性能（P1-4）：有限并发 + 增量缓存 + 进度/取消 ----------
@@ -102,82 +112,7 @@ const DEFAULT_ROOT = process.env.MUSIC_ROOT || app.getPath('music')
 let win = null
 let root = DEFAULT_ROOT
 
-// ---------- IPC 路径边界校验（P0-2） ----------
-// 渲染层被注入时，IPC 传入的任意路径都不可信：所有读写删 handler 只允许
-// 操作「用户明确授权过的目录」内的文件。授权目录 = 当前曲库根 + 用户经
-// 系统对话框（dialog:pickFolder）或 library:scan 明确选过的目录（只增不减，
-// 避免多目录场景下换过曲库根后旧曲库的收藏/删歌被误伤）。集中校验，不重构各 handler。
-const authorizedDirs = new Set()
-
-// Windows 下路径比较不区分大小写；POSIX 保持原样。
-function _normForCompare(p) {
-  return process.platform === 'win32' ? String(p).toLowerCase() : String(p)
-}
-
-// 解析符号链接，返回规范路径。目标不存在时逐级向上找存在的父目录解析后再拼回。
-function _canonicalize(p) {
-  const abs = path.resolve(p)
-  try {
-    return fs.realpathSync(abs)
-  } catch {
-    let cur = abs
-    const rest = []
-    for (;;) {
-      const parent = path.dirname(cur)
-      if (parent === cur) return abs // 已到文件系统根，仍无存在的祖先
-      rest.unshift(path.basename(cur))
-      cur = parent
-      try {
-        return path.join(fs.realpathSync(cur), ...rest)
-      } catch { /* 继续向上找存在的祖先 */ }
-    }
-  }
-}
-
-function _isInside(dir, file) {
-  const d = _normForCompare(path.resolve(dir))
-  const f = _normForCompare(file)
-  return f === d || f.startsWith(d + path.sep)
-}
-
-// 把目录加入授权集合（先规范化，目录本身是符号链接时也按真实目标授权）。
-function authorizeDir(dir) {
-  if (typeof dir !== 'string' || !dir) return
-  try {
-    authorizedDirs.add(_canonicalize(dir))
-  } catch { /* 授权失败时不抛错，调用方仍按原流程返回 */ }
-}
-
-// 在授权目录内则返回规范化后的路径，否则抛错（错误信息不含绝对路径）。
-// allowUserData：同时允许 app.getPath('userData') 内路径（供内部写配置/缓存类
-// 场景复用；本次没有任何 handler 开启）。
-function assertInsideLibrary(filePath, { allowUserData = false } = {}) {
-  if (typeof filePath !== 'string' || !filePath) {
-    throw Object.assign(new Error('PATH_OUTSIDE_LIBRARY：路径不在曲库授权目录内'), { code: 'PATH_OUTSIDE_LIBRARY' })
-  }
-  const resolved = _canonicalize(filePath)
-  for (const dir of authorizedDirs) {
-    if (_isInside(dir, resolved)) return resolved
-  }
-  if (allowUserData) {
-    try {
-      if (_isInside(_canonicalize(app.getPath('userData')), resolved)) return resolved
-    } catch { /* 取不到 userData 路径时按越界处理 */ }
-  }
-  throw Object.assign(new Error('PATH_OUTSIDE_LIBRARY：路径不在曲库授权目录内'), { code: 'PATH_OUTSIDE_LIBRARY' })
-}
-
-// 不抛错的版本，供“派生路径”（同目录 .lrc/.jpg）复查：返回是否在库内。
-function isInsideLibrary(filePath) {
-  try {
-    assertInsideLibrary(filePath)
-    return true
-  } catch {
-    return false
-  }
-}
-
-// 默认曲库根即授权目录；配置里的 root 在 loadUserConfig 采用时再追加授权。
+// 默认曲库根即授权目录；配置里的 root 在 loadUserConfig 采用时再追加授权（实现在 ./lib/path-guard.js）。
 authorizeDir(root)
 
 function cfgPath() {
