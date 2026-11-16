@@ -40,6 +40,84 @@ const DEFAULT_ROOT = process.env.MUSIC_ROOT || app.getPath('music')
 let win = null
 let root = DEFAULT_ROOT
 
+// ---------- IPC 路径边界校验（P0-2） ----------
+// 渲染层被注入时，IPC 传入的任意路径都不可信：所有读写删 handler 只允许
+// 操作「用户明确授权过的目录」内的文件。授权目录 = 当前曲库根 + 用户经
+// 系统对话框（dialog:pickFolder）或 library:scan 明确选过的目录（只增不减，
+// 避免多目录场景下换过曲库根后旧曲库的收藏/删歌被误伤）。集中校验，不重构各 handler。
+const authorizedDirs = new Set()
+
+// Windows 下路径比较不区分大小写；POSIX 保持原样。
+function _normForCompare(p) {
+  return process.platform === 'win32' ? String(p).toLowerCase() : String(p)
+}
+
+// 解析符号链接，返回规范路径。目标不存在时逐级向上找存在的父目录解析后再拼回。
+function _canonicalize(p) {
+  const abs = path.resolve(p)
+  try {
+    return fs.realpathSync(abs)
+  } catch {
+    let cur = abs
+    const rest = []
+    for (;;) {
+      const parent = path.dirname(cur)
+      if (parent === cur) return abs // 已到文件系统根，仍无存在的祖先
+      rest.unshift(path.basename(cur))
+      cur = parent
+      try {
+        return path.join(fs.realpathSync(cur), ...rest)
+      } catch { /* 继续向上找存在的祖先 */ }
+    }
+  }
+}
+
+function _isInside(dir, file) {
+  const d = _normForCompare(path.resolve(dir))
+  const f = _normForCompare(file)
+  return f === d || f.startsWith(d + path.sep)
+}
+
+// 把目录加入授权集合（先规范化，目录本身是符号链接时也按真实目标授权）。
+function authorizeDir(dir) {
+  if (typeof dir !== 'string' || !dir) return
+  try {
+    authorizedDirs.add(_canonicalize(dir))
+  } catch { /* 授权失败时不抛错，调用方仍按原流程返回 */ }
+}
+
+// 在授权目录内则返回规范化后的路径，否则抛错（错误信息不含绝对路径）。
+// allowUserData：同时允许 app.getPath('userData') 内路径（供内部写配置/缓存类
+// 场景复用；本次没有任何 handler 开启）。
+function assertInsideLibrary(filePath, { allowUserData = false } = {}) {
+  if (typeof filePath !== 'string' || !filePath) {
+    throw Object.assign(new Error('PATH_OUTSIDE_LIBRARY：路径不在曲库授权目录内'), { code: 'PATH_OUTSIDE_LIBRARY' })
+  }
+  const resolved = _canonicalize(filePath)
+  for (const dir of authorizedDirs) {
+    if (_isInside(dir, resolved)) return resolved
+  }
+  if (allowUserData) {
+    try {
+      if (_isInside(_canonicalize(app.getPath('userData')), resolved)) return resolved
+    } catch { /* 取不到 userData 路径时按越界处理 */ }
+  }
+  throw Object.assign(new Error('PATH_OUTSIDE_LIBRARY：路径不在曲库授权目录内'), { code: 'PATH_OUTSIDE_LIBRARY' })
+}
+
+// 不抛错的版本，供“派生路径”（同目录 .lrc/.jpg）复查：返回是否在库内。
+function isInsideLibrary(filePath) {
+  try {
+    assertInsideLibrary(filePath)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// 默认曲库根即授权目录；配置里的 root 在 loadUserConfig 采用时再追加授权。
+authorizeDir(root)
+
 function cfgPath() {
   return path.join(app.getPath('userData'), 'user-config.json')
 }
@@ -50,6 +128,7 @@ function loadUserConfig() {
       const cfg = JSON.parse(fs.readFileSync(f, 'utf8'))
       if (cfg && cfg.root && fs.existsSync(cfg.root)) {
         root = cfg.root
+        authorizeDir(cfg.root)
         return cfg
       }
     }
@@ -129,7 +208,14 @@ function parseLrc(text) {
 ipcMain.handle('library:scan', async (_e, dir) => {
   if (!dir) loadUserConfig()
   const target = dir || root
+  // dir 必须存在且为目录，否则拒绝并保留旧 root（不持久化、不改 root）
+  let st = null
+  try { st = fs.statSync(target) } catch { st = null }
+  if (!st || !st.isDirectory()) {
+    return { root, tracks: [], error: 'PATH_INVALID：目录不存在或不是目录' }
+  }
   root = target
+  authorizeDir(target)
   if (dir) saveUserConfig({ root: target })
   const files = []
   await walk(target, files)
@@ -161,6 +247,8 @@ ipcMain.handle('library:scan', async (_e, dir) => {
 })
 
 ipcMain.handle('lyrics:get', async (_e, filePath) => {
+  // 越界路径按“无歌词”处理，不泄露路径信息
+  try { filePath = assertInsideLibrary(filePath) } catch { return { source: 'none', lines: [], paired: 0 } }
   const dir = path.dirname(filePath)
   const base = path.basename(filePath, path.extname(filePath))
   // 多个歌词候选：同名 .lrc 优先，其次常见的双语/翻译后缀
@@ -172,6 +260,7 @@ ipcMain.handle('lyrics:get', async (_e, filePath) => {
   for (const n of names) {
     const fp = path.join(dir, n)
     if (!fs.existsSync(fp)) continue
+    if (!isInsideLibrary(fp)) continue // 侧车 .lrc 是库外符号链接时不跟随读取
     try {
       const text = (await fsp.readFile(fp, 'utf8')).replace(/^\uFEFF/, '')
       const lines = parseLrc(text)
@@ -200,10 +289,12 @@ const coverCache = new Map()
 const fileUrl = (p) => 'file:///' + encodeURI(String(p).replace(/\\/g, '/'))
 
 ipcMain.handle('cover:get', async (_e, filePath) => {
+  // 越界路径按“无封面”处理，不泄露路径信息
+  try { filePath = assertInsideLibrary(filePath) } catch { return '' }
   if (coverCache.has(filePath)) return coverCache.get(filePath)
   // 优先用侧车高清封面（下载时写的 .jpg）
   const sideCover = filePath.replace(/\.[^.]+$/, '') + '.jpg'
-  if (fs.existsSync(sideCover)) {
+  if (fs.existsSync(sideCover) && isInsideLibrary(sideCover)) { // 侧车封面是库外符号链接时不跟随读取
     const u = fileUrl(sideCover)
     coverCache.set(filePath, u)
     return u
@@ -224,7 +315,9 @@ ipcMain.handle('cover:get', async (_e, filePath) => {
 
 ipcMain.handle('dialog:pickFolder', async () => {
   const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'] })
-  return r.canceled ? null : r.filePaths[0]
+  if (r.canceled) return null
+  authorizeDir(r.filePaths[0])
+  return r.filePaths[0]
 })
 
 // ---------- 内置网易云 API ----------
@@ -240,9 +333,14 @@ ipcMain.handle('lyrics:auto', async (_e, { title, artist, filePath }) => {
     if (!r.ok) return { ok: false, reason: r.reason }
     // 写旁挂歌词，下次直接命中
     if (filePath) {
-      const side = filePath.replace(/\.[^.]+$/, '') + '.lrc'
+      let side = ''
+      try {
+        side = assertInsideLibrary(filePath).replace(/\.[^.]+$/, '') + '.lrc'
+      } catch {
+        return { ok: false, reason: 'PATH_OUTSIDE_LIBRARY：路径不在曲库授权目录内' }
+      }
       try { fs.writeFileSync(side, r.text, 'utf8') }
-      catch (e) { return { ok: false, reason: 'write:' + (e.code || e.message) + ' @' + side } }
+      catch (e) { return { ok: false, reason: 'WRITE_FAILED' + (e.code ? '(' + e.code + ')' : '') + '：写入歌词文件失败' } }
     }
     const lines = parseLrc(r.text.replace(/^\uFEFF/, ''))
     return { ok: lines.length > 0, lines, song: r.song, paired: lines.filter((l) => l.pair).length }
@@ -255,8 +353,14 @@ ipcMain.handle('net:playlist', async (_e, id) => netapi.playlistSongs(id))
 ipcMain.handle('net:songDetail', async (_e, id) => netapi.songDetail(id))
 
 ipcMain.handle('net:preview', async (_e, trackId) => netapi.trackUrl(trackId))
-ipcMain.handle('net:download', async (_e, payload) => netapi.downloadVoice({ ...payload, dir: root }))
+ipcMain.handle('net:download', async (_e, payload) => {
+  // 覆盖目标必须在库内才传给 downloadVoice；越界时抛错，渲染层按下载失败处理
+  if (payload && payload.targetPath) assertInsideLibrary(payload.targetPath)
+  return netapi.downloadVoice({ ...payload, dir: root })
+})
 ipcMain.handle('net:replaceSource', async (_e, payload) => {
+  // 同上：覆盖目标必须在库内
+  if (payload && payload.targetPath) assertInsideLibrary(payload.targetPath)
   const res = await netapi.downloadVoice({
     voice: payload.voice,
     song: payload.song,
@@ -272,6 +376,8 @@ ipcMain.handle('net:replaceSource', async (_e, payload) => {
 const FAV_DIR_NAME = '我喜欢的音乐'
 ipcMain.handle('lib:fav', async (_e, { filePath, on }) => {
   try {
+    // 收藏是“复制源文件进收藏目录”：源文件必须在库内（目标端原有 path.basename 保留）
+    if (on) assertInsideLibrary(filePath)
     const dir = path.join(root, FAV_DIR_NAME)
     await fsp.mkdir(dir, { recursive: true })
     const dst = path.join(dir, path.basename(filePath))
@@ -279,7 +385,7 @@ ipcMain.handle('lib:fav', async (_e, { filePath, on }) => {
     const dstLrc = dst.replace(/\.[^.]+$/, '.lrc')
     if (on) {
       if (!fs.existsSync(dst)) await fsp.copyFile(filePath, dst)
-      if (fs.existsSync(srcLrc) && !fs.existsSync(dstLrc)) await fsp.copyFile(srcLrc, dstLrc)
+      if (fs.existsSync(srcLrc) && isInsideLibrary(srcLrc) && !fs.existsSync(dstLrc)) await fsp.copyFile(srcLrc, dstLrc)
       return { ok: true, file: dst }
     }
     if (fs.existsSync(dst)) await fsp.unlink(dst)
@@ -295,7 +401,13 @@ ipcMain.handle('lib:coverFix', async (_e, tracks) => {
   let done = 0, skipped = 0
   const errors = []
   for (const t of list) {
-    const side = String(t.path).replace(/\.[^.]+$/, '') + '.jpg'
+    // 越界曲目不写盘，记入 errors（不中断其余曲目）
+    let trackPath = ''
+    try { trackPath = assertInsideLibrary(t.path) } catch {
+      errors.push({ name: t.title || t.path, reason: 'PATH_OUTSIDE_LIBRARY：路径不在曲库授权目录内' })
+      continue
+    }
+    const side = trackPath.replace(/\.[^.]+$/, '') + '.jpg'
     if (fs.existsSync(side)) { skipped++; continue }
     try {
       const buf = await netapi.coverBuffer({ name: t.title, artist: t.artist, cover: t.cover })
@@ -316,15 +428,20 @@ ipcMain.handle('lib:coverFix', async (_e, tracks) => {
 
 ipcMain.handle('lib:delete', async (_e, filePath) => {
   try {
-    const base = String(filePath).replace(/\.[^.]+$/, '')
-    const targets = [filePath, base + '.lrc', base + '.jpg']
+    const checked = assertInsideLibrary(filePath)
+    const base = checked.replace(/\.[^.]+$/, '')
+    const targets = [checked, base + '.lrc', base + '.jpg']
     let removed = 0
+    let trashFailed = false
     for (const f of targets) {
       if (!fs.existsSync(f)) continue
+      if (!isInsideLibrary(f)) continue // 派生文件是库外符号链接时不删
       try { await shell.trashItem(f); removed++ }
-      catch { try { await fsp.unlink(f); removed++ } catch { } }
+      catch { trashFailed = true /* 回收站失败不再回退直接删除，返回失败让用户知晓 */ }
     }
     coverCache.delete(filePath)
+    coverCache.delete(checked)
+    if (trashFailed) return { ok: false, reason: 'TRASH_FAILED：移入回收站失败，文件未删除', removed }
     return { ok: true, removed }
   } catch (e) {
     return { ok: false, reason: String(e.message || e) }

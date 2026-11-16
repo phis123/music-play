@@ -55,11 +55,42 @@ public class Bridge {
         return AudioStore.listJson(act);
     }
 
+    // ---------------- 路径边界校验（P0-2） ----------------
+    // WebView 注入时，JS 传入的任意路径都不可信：读/删只允许发生在曲库枚举
+    // 过的根目录内。白名单 = AudioStore.listJson() 枚举的三个根（公共 Music
+    // 目录、Music/music-play、私有外部目录）；私有外部目录同时覆盖
+    // getExternalFilesDir(null)/lyrics 下的私有歌词缓存（loadLyric 经
+    // readText 读取）。只比较规范路径（getCanonicalFile），符号链接到
+    // 白名单外的目标会被拒绝。
+    private boolean isInsideAllowedRoot(File f) {
+        try {
+            if (f == null) return false;
+            File canon = f.getCanonicalFile();
+            File pubMusic = android.os.Environment.getExternalStoragePublicDirectory(
+                    android.os.Environment.DIRECTORY_MUSIC);
+            File[] roots = new File[]{
+                    new File(pubMusic, "music-play"), // AudioStore.rootDir()，不直接调以免触发 mkdirs
+                    pubMusic,
+                    act.getExternalFilesDir(null),
+            };
+            for (File r : roots) {
+                if (r == null) continue;
+                File rc = r.getCanonicalFile();
+                if (canon.equals(rc)) return true;
+                String rp = rc.getAbsolutePath();
+                if (!rp.endsWith(File.separator)) rp += File.separator;
+                if (canon.getAbsolutePath().startsWith(rp)) return true;
+            }
+        } catch (Exception ignored) { }
+        return false;
+    }
+
     /** 读取歌词等文本文件（UTF-8 / BOM 兼容） */
     @JavascriptInterface
     public String readText(String path) {
         try {
             File f = new File(path);
+            if (!isInsideAllowedRoot(f)) return null; // 越界按“无此文件”处理，返回值约定不变
             if (!f.exists()) return null;
             BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(f), "UTF-8"));
             StringBuilder sb = new StringBuilder();
@@ -480,12 +511,18 @@ public class Bridge {
         JSONObject o = new JSONObject();
         try {
             java.io.File f = new java.io.File(path);
+            if (!isInsideAllowedRoot(f)) {
+                // 越界拒绝：JSON 结构与原失败返回一致（ok + reason），调用方按原有逻辑提示
+                o.put("ok", false);
+                o.put("reason", "路径不在曲库目录内");
+                return o.toString();
+            }
             boolean existed = f.exists();
             boolean ok = existed ? f.delete() : true;
             if (ok) {
                 String base = path.replaceAll("\\.[^.]+$", "");
                 java.io.File lrc = new java.io.File(base + ".lrc");
-                if (lrc.exists()) lrc.delete();
+                if (lrc.exists() && isInsideAllowedRoot(lrc)) lrc.delete(); // 派生歌词是库外符号链接时不删
                 try {
                     act.getContentResolver().delete(
                         android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
