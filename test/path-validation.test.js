@@ -13,7 +13,15 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
-const { assertInsideLibrary, authorizeDir, resetAuthorizedDirs, isInsideLibrary } = require('../lib/path-guard')
+const {
+  assertInsideLibrary,
+  authorizeDir,
+  resetAuthorizedDirs,
+  isInsideLibrary,
+  validateDownloadPayload,
+  validateReplaceSourcePayload,
+} = require('../lib/path-guard')
+const { downloadVoice } = require('../netapi')
 
 test('拒绝 ../ 穿越到曲库根之外（library:scan / lyrics:get / cover:get）', () => {
   const root = '/music'
@@ -71,4 +79,97 @@ test('Windows 大小写/盘符变体也被拒绝', () => {
   } else {
     assert.throws(() => assertInsideLibrary('/Music/../secret.txt', '/Music'), /outside|越界|不允许|不在曲库/i)
   }
+})
+
+test('P0-1 回归：net:download (validateDownloadPayload) 严禁透传 overwritePath / targetPath 绕过校验', () => {
+  resetAuthorizedDirs()
+  authorizeDir('/music')
+  // 正常普通下载：只保留 voice / song / dir，剔除任何额外未知属性
+  const clean = validateDownloadPayload({
+    voice: { mainTrackId: 1, title: 'v' },
+    song: { name: 's' },
+    extraUntrustedField: 'dropped',
+  }, '/music')
+  assert.equal('overwritePath' in clean, false)
+  assert.equal('targetPath' in clean, false)
+  assert.equal('extraUntrustedField' in clean, false)
+
+  // 试图通过 overwritePath 绕过 targetPath 检查（无论是库外还是库内路径，普通下载一律拒绝覆盖）
+  assert.throws(
+    () => validateDownloadPayload({ voice: { mainTrackId: 1 }, overwritePath: '/etc/passwd' }, '/music'),
+    /PATH_OUTSIDE_LIBRARY|禁止指定覆盖路径/
+  )
+  assert.throws(
+    () => validateDownloadPayload({ voice: { mainTrackId: 1 }, targetPath: '/etc/passwd' }, '/music'),
+    /PATH_OUTSIDE_LIBRARY|禁止指定覆盖路径/
+  )
+  assert.throws(
+    () => validateDownloadPayload({ voice: { mainTrackId: 1 }, overwritePath: '/music/song.mp3' }, '/music'),
+    /PATH_OUTSIDE_LIBRARY|禁止指定覆盖路径/
+  )
+})
+
+test('P0-1 回归：net:replaceSource (validateReplaceSourcePayload) 必须验证目标路径在授权曲库内', () => {
+  resetAuthorizedDirs()
+  authorizeDir('/music')
+  // 库内合法替换放行，并统一输出为 targetPath
+  const ok1 = validateReplaceSourcePayload({
+    voice: { mainTrackId: 1 },
+    song: { name: 's' },
+    targetPath: '/music/sub/song.mp3',
+  }, '/music')
+  assert.ok(ok1.targetPath.endsWith('song.mp3'))
+
+  // 兼容旧字段 overwritePath，但也必须经过校验且归一化为 targetPath
+  const ok2 = validateReplaceSourcePayload({
+    voice: { mainTrackId: 1 },
+    song: { name: 's' },
+    overwritePath: '/music/sub/song2.mp3',
+  }, '/music')
+  assert.ok(ok2.targetPath.endsWith('song2.mp3'))
+
+  // 缺少目标路径、库外路径、或 targetPath 与 overwritePath 不一致时明确拒绝
+  assert.throws(
+    () => validateReplaceSourcePayload({ voice: { mainTrackId: 1 } }, '/music'),
+    /PATH_OUTSIDE_LIBRARY/
+  )
+  assert.throws(
+    () => validateReplaceSourcePayload({ voice: { mainTrackId: 1 }, targetPath: '/music/../evil.mp3' }, '/music'),
+    /PATH_OUTSIDE_LIBRARY/
+  )
+  assert.throws(
+    () => validateReplaceSourcePayload({ voice: { mainTrackId: 1 }, overwritePath: '/outside/evil.mp3' }, '/music'),
+    /PATH_OUTSIDE_LIBRARY/
+  )
+  assert.throws(
+    () => validateReplaceSourcePayload({
+      voice: { mainTrackId: 1 },
+      targetPath: '/music/good.mp3',
+      overwritePath: '/outside/evil.mp3',
+    }, '/music'),
+    /PATH_OUTSIDE_LIBRARY|不一致/
+  )
+})
+
+test('P0-1 纵深防御：netapi.downloadVoice 内部也拒绝越界 overwritePath / targetPath', async () => {
+  resetAuthorizedDirs()
+  authorizeDir('/music')
+  await assert.rejects(
+    downloadVoice({
+      voice: { mainTrackId: 1, title: 'v' },
+      song: { name: 's' },
+      dir: '/music',
+      overwritePath: '/outside/evil.mp3',
+    }),
+    /PATH_OUTSIDE_LIBRARY/
+  )
+  await assert.rejects(
+    downloadVoice({
+      voice: { mainTrackId: 1, title: 'v' },
+      song: { name: 's' },
+      dir: '/music',
+      targetPath: '/music/../evil.mp3',
+    }),
+    /PATH_OUTSIDE_LIBRARY/
+  )
 })

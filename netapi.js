@@ -8,6 +8,7 @@ const fsp = fs.promises
 const net = require('net')
 const http = require('http')
 const https = require('https')
+const { assertInsideLibrary } = require('./lib/path-guard')
 // Electron 只在应用内可用；测试时用 plain node 直接 require 本模块，
 // 此时 require('electron') 不存在（或只返回二进制路径字符串，无 app 对象），
 // 用一个最小的 app 桩代替，让 log() 等用到 app.getPath 的地方不至于在加载期
@@ -337,18 +338,42 @@ function downloadTo(url, filePath, onProgress) {
     const mod = url.startsWith('https') ? https : http
     let out = null
     let settled = false
-    // 任意失败路径：关闭写流并删除临时文件，避免残留 .downloading
-    const cleanup = () => {
-      try { if (out) out.destroy() } catch { /* 忽略 */ }
-      try { fs.unlinkSync(filePath) } catch { /* 不存在或删不掉时忽略 */ }
+    // P1-3：Windows 下必须等待 WriteStream 真正关闭文件句柄（'close' 事件）后再删除临时文件，
+    // 否则 out.destroy() 刚触发时尚未释放底层 fd，同步 unlinkSync 可能因 EBUSY/EPERM 失败残留 .downloading。
+    const closeAndCleanup = (done) => {
+      const unlinkTemp = () => {
+        fs.unlink(filePath, () => {
+          try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath) } catch { /* 忽略 */ }
+          done()
+        })
+      }
+      if (!out) {
+        unlinkTemp()
+        return
+      }
+      let cleaned = false
+      const onStreamClosed = () => {
+        if (cleaned) return
+        cleaned = true
+        unlinkTemp()
+      }
+      if (out.closed || out.destroyed) {
+        // 若流已处于 closed 状态直接删；若仅 destroyed 但尚未触发 close，仍等待 close 或超时兜底
+        if (out.closed) {
+          onStreamClosed()
+          return
+        }
+      }
+      out.once('close', onStreamClosed)
+      try { out.destroy() } catch { onStreamClosed() }
+      setTimeout(onStreamClosed, 250).unref?.()
     }
     const fail = (err) => {
       if (settled) return
       settled = true
-      cleanup()
-      // 断开请求，停止继续收数据（失败路径不再消费响应体）
+      // 先断开网络请求，停止继续收数据
       try { req.destroy() } catch { /* 尚未建立或已关闭时忽略 */ }
-      reject(err)
+      closeAndCleanup(() => reject(err))
     }
     const req = mod.get(url, { timeout: 60000 }, (res) => {
       if (res.statusCode !== 200) return fail(new Error('HTTP ' + res.statusCode))
@@ -375,7 +400,8 @@ function downloadTo(url, filePath, onProgress) {
         if (settled) return
         // 完整性校验：服务端给了 content-length 时，实收字节必须一致
         if (total > 0 && got !== total) {
-          return fail(new Error('下载不完整：已下载 ' + got + ' / ' + total + ' 字节'))
+          out.close(() => fail(new Error('下载不完整：已下载 ' + got + ' / ' + total + ' 字节')))
+          return
         }
         settled = true
         out.close(() => resolve({ bytes: got }))
@@ -387,15 +413,21 @@ function downloadTo(url, filePath, onProgress) {
   })
 }
 
-async function downloadVoice({ voice, song, dir, overwritePath }) {
-  // 先算出最终目标文件（不依赖网络），再按它加锁：同一目标并发两次时，
-  // 第二次直接复用进行中的 Promise，不会共用 .downloading 交错写入。
-  // 注意：overwritePath 的路径约束不在这里做——netapi 不知道曲库根，
-  // 由第 2 项 IPC 改动在 main.js 的 net:download / net:replaceSource
-  // handler 层约束；这里只保证内部生成的目标路径仍走 sanitize + 重名递增。
-  const target = overwritePath ? path.dirname(overwritePath) : (dir || path.join(app.getPath('music'), 'music-play'))
+async function downloadVoice({ voice, song, dir, targetPath, overwritePath }) {
+  // P0-1 纵深防御：统一下载目标参数为 targetPath（兼容旧调用方 overwritePath，但严禁两者不一致），
+  // 且只要指定了覆盖目标路径，必须在 netapi 层再次执行曲库边界校验，绝不允许未校验路径写入磁盘。
+  if (targetPath !== undefined && overwritePath !== undefined && targetPath !== overwritePath) {
+    throw Object.assign(new Error('PATH_OUTSIDE_LIBRARY：targetPath 与 overwritePath 不一致'), { code: 'PATH_OUTSIDE_LIBRARY' })
+  }
+  const rawTarget = targetPath !== undefined ? targetPath : overwritePath
+  const baseDir = dir || path.join(app.getPath('music'), 'music-play')
+  let checkedTarget = ''
+  if (rawTarget !== undefined && rawTarget !== null) {
+    checkedTarget = dir ? assertInsideLibrary(rawTarget, dir) : assertInsideLibrary(rawTarget)
+  }
+  const target = checkedTarget ? path.dirname(checkedTarget) : baseDir
 
-  let file = overwritePath
+  let file = checkedTarget
   if (!file) {
     const base = sanitize(song && song.name ? song.name : voice.title || 'voice')
     file = path.join(target, `${base}.mp3`)

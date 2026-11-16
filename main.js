@@ -35,11 +35,54 @@ if (process.env.DSH_SESSION_ID || process.env.ELECTRON_NO_SANDBOX === '1') {
 
 const netapi = require('./netapi')
 const { parseLrc } = require('./lib/lrc')
-const { authorizeDir, assertInsideLibrary: _assertInsideLib, isInsideLibrary } = require('./lib/path-guard')
+const {
+  authorizeDir,
+  assertInsideLibrary: _assertInsideLib,
+  isInsideLibrary,
+  validateDownloadPayload,
+  validateReplaceSourcePayload,
+} = require('./lib/path-guard')
+const {
+  isAllowedLocalPageUrl,
+  isSafeExternalUrl,
+  assertTrustedIpcSender,
+} = require('./lib/ipc-guard')
 const assertInsideLibrary = (filePath, opts = {}) => _assertInsideLib(filePath, {
   ...opts,
   userDataDir: opts && opts.allowUserData ? app.getPath('userData') : '',
 })
+
+const INDEX_HTML_PATH = path.join(__dirname, 'renderer', 'index.html')
+const FLOAT_HTML_PATH = path.join(__dirname, 'renderer', 'float.html')
+
+function verifyIpc(event, { allowFloat = false } = {}) {
+  const allowedSenders = [
+    win && !win.isDestroyed() ? win.webContents : null,
+    allowFloat && floatWin && !floatWin.isDestroyed() ? floatWin.webContents : null,
+  ].filter(Boolean)
+  const allowedFiles = allowFloat ? [INDEX_HTML_PATH, FLOAT_HTML_PATH] : [INDEX_HTML_PATH]
+  return assertTrustedIpcSender(event, { allowedSenders, allowedFiles })
+}
+
+function hardenWindowNavigation(wc, allowedHtmlFile) {
+  if (!wc) return
+  wc.setWindowOpenHandler(({ url }) => {
+    if (isSafeExternalUrl(url)) {
+      shell.openExternal(url).catch(() => {})
+    }
+    return { action: 'deny' }
+  })
+  wc.on('will-navigate', (event, url) => {
+    if (isAllowedLocalPageUrl(url, [allowedHtmlFile])) return
+    event.preventDefault()
+    if (isSafeExternalUrl(url)) {
+      shell.openExternal(url).catch(() => {})
+    }
+  })
+  wc.on('will-attach-webview', (event) => {
+    event.preventDefault()
+  })
+}
 
 const AUDIO_EXT = new Set(['.mp3', '.flac', '.wav', '.ogg', '.m4a', '.aac', '.opus'])
 // ---------- 曲库扫描性能（P1-4）：有限并发 + 增量缓存 + 进度/取消 ----------
@@ -107,7 +150,8 @@ async function buildLrcSets(dirs) {
 // 此前这里是作者本机绝对路径，已移除：新安装不应默认指向
 // 一个不存在的个人目录，否则首次启动会静默空库。已有 user-config.json
 // 或 MUSIC_ROOT 时仍优先使用它们；用户也可随时用“选择目录”更改。
-const DEFAULT_ROOT = process.env.MUSIC_ROOT || app.getPath('music')
+const DEFAULT_ROOT = process.env.MUSIC_ROOT ||
+  (app && typeof app.getPath === 'function' ? app.getPath('music') : path.join(require('os').homedir(), 'Music'))
 
 let win = null
 let root = DEFAULT_ROOT
@@ -182,6 +226,7 @@ async function walk(dir, out, depth = 0) {
 // 实现在 lib/lrc.js（纯函数，可在 plain node 里测试），此处只引用，不改行为。
 
 ipcMain.handle('library:scan', async (_e, dir) => {
+  verifyIpc(_e)
   if (!dir) loadUserConfig()
   const target = dir || root
   // dir 必须存在且为目录，否则拒绝并保留旧 root（不持久化、不改 root）
@@ -268,9 +313,13 @@ ipcMain.handle('library:scan', async (_e, dir) => {
   return { root: target, tracks, total, truncated, cancelled: scanCancelRequested }
 })
 
-ipcMain.on('library:scan-cancel', () => { scanCancelRequested = true })
+ipcMain.on('library:scan-cancel', (_e) => {
+  try { verifyIpc(_e) } catch { return }
+  scanCancelRequested = true
+})
 
 ipcMain.handle('lyrics:get', async (_e, filePath) => {
+  try { verifyIpc(_e) } catch { return { source: 'none', lines: [], paired: 0 } }
   // 越界路径按“无歌词”处理，不泄露路径信息
   try { filePath = assertInsideLibrary(filePath) } catch { return { source: 'none', lines: [], paired: 0 } }
   const dir = path.dirname(filePath)
@@ -313,6 +362,7 @@ const coverCache = new Map()
 const fileUrl = (p) => 'file:///' + encodeURI(String(p).replace(/\\/g, '/'))
 
 ipcMain.handle('cover:get', async (_e, filePath) => {
+  try { verifyIpc(_e) } catch { return '' }
   // 越界路径按“无封面”处理，不泄露路径信息
   try { filePath = assertInsideLibrary(filePath) } catch { return '' }
   if (coverCache.has(filePath)) return coverCache.get(filePath)
@@ -337,7 +387,8 @@ ipcMain.handle('cover:get', async (_e, filePath) => {
   return url
 })
 
-ipcMain.handle('dialog:pickFolder', async () => {
+ipcMain.handle('dialog:pickFolder', async (_e) => {
+  verifyIpc(_e)
   const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'] })
   if (r.canceled) return null
   authorizeDir(r.filePaths[0])
@@ -345,14 +396,19 @@ ipcMain.handle('dialog:pickFolder', async () => {
 })
 
 // ---------- 内置网易云 API ----------
-ipcMain.handle('net:songs', async (_e, kw) => netapi.searchSongs(kw))
+ipcMain.handle('net:songs', async (_e, kw) => {
+  verifyIpc(_e)
+  return netapi.searchSongs(kw)
+})
 ipcMain.handle('net:voices', async (_e, payload) => {
+  verifyIpc(_e)
   // payload 可以是字符串（播客 tab）或 { name, artist }（选中歌曲后找声音）
   if (typeof payload === 'string') return netapi.searchVoicesSmart(payload, '')
   return netapi.searchVoicesSmart(payload.name, payload.artist, payload.duration || 0)
 })
 ipcMain.handle('lyrics:auto', async (_e, { title, artist, filePath }) => {
   try {
+    verifyIpc(_e)
     const r = await netapi.autoLyric({ title, artist })
     if (!r.ok) return { ok: false, reason: r.reason }
     // 写旁挂歌词，下次直接命中
@@ -373,25 +429,32 @@ ipcMain.handle('lyrics:auto', async (_e, { title, artist, filePath }) => {
   }
 })
 
-ipcMain.handle('net:playlist', async (_e, id) => netapi.playlistSongs(id))
-ipcMain.handle('net:songDetail', async (_e, id) => netapi.songDetail(id))
+ipcMain.handle('net:playlist', async (_e, id) => {
+  verifyIpc(_e)
+  return netapi.playlistSongs(id)
+})
+ipcMain.handle('net:songDetail', async (_e, id) => {
+  verifyIpc(_e)
+  return netapi.songDetail(id)
+})
 
-ipcMain.handle('net:preview', async (_e, trackId) => netapi.trackUrl(trackId))
+ipcMain.handle('net:preview', async (_e, trackId) => {
+  verifyIpc(_e)
+  return netapi.trackUrl(trackId)
+})
 ipcMain.handle('net:download', async (_e, payload) => {
-  // 覆盖目标必须在库内才传给 downloadVoice；越界时抛错，渲染层按下载失败处理
-  if (payload && payload.targetPath) assertInsideLibrary(payload.targetPath)
-  return netapi.downloadVoice({ ...payload, dir: root })
+  verifyIpc(_e)
+  // P0-1：普通下载禁止透传 overwritePath / targetPath，只能写入授权曲库根目录
+  const cleanOpts = validateDownloadPayload(payload, root)
+  return netapi.downloadVoice(cleanOpts)
 })
 ipcMain.handle('net:replaceSource', async (_e, payload) => {
-  // 同上：覆盖目标必须在库内
-  if (payload && payload.targetPath) assertInsideLibrary(payload.targetPath)
-  const res = await netapi.downloadVoice({
-    voice: payload.voice,
-    song: payload.song,
-    overwritePath: payload.targetPath,
-    dir: root,
-  })
-  if (payload.targetPath) coverCache.delete(payload.targetPath)
+  verifyIpc(_e)
+  // P0-1：替换音源必须经过主进程路径验证，统一下载目标参数为 targetPath
+  const cleanOpts = validateReplaceSourcePayload(payload, root)
+  const res = await netapi.downloadVoice(cleanOpts)
+  if (cleanOpts.targetPath) coverCache.delete(cleanOpts.targetPath)
+  if (payload && payload.targetPath) coverCache.delete(payload.targetPath)
   return res
 })
 
@@ -400,15 +463,16 @@ ipcMain.handle('net:replaceSource', async (_e, payload) => {
 const FAV_DIR_NAME = '我喜欢的音乐'
 ipcMain.handle('lib:fav', async (_e, { filePath, on }) => {
   try {
+    verifyIpc(_e)
     // 收藏是“复制源文件进收藏目录”：源文件必须在库内（目标端原有 path.basename 保留）
-    if (on) assertInsideLibrary(filePath)
+    const checkedSrc = assertInsideLibrary(filePath)
     const dir = path.join(root, FAV_DIR_NAME)
     await fsp.mkdir(dir, { recursive: true })
-    const dst = path.join(dir, path.basename(filePath))
-    const srcLrc = filePath.replace(/\.[^.]+$/, '.lrc')
+    const dst = path.join(dir, path.basename(checkedSrc))
+    const srcLrc = checkedSrc.replace(/\.[^.]+$/, '.lrc')
     const dstLrc = dst.replace(/\.[^.]+$/, '.lrc')
     if (on) {
-      if (!fs.existsSync(dst)) await fsp.copyFile(filePath, dst)
+      if (!fs.existsSync(dst)) await fsp.copyFile(checkedSrc, dst)
       if (fs.existsSync(srcLrc) && isInsideLibrary(srcLrc) && !fs.existsSync(dstLrc)) await fsp.copyFile(srcLrc, dstLrc)
       return { ok: true, file: dst }
     }
@@ -421,6 +485,7 @@ ipcMain.handle('lib:fav', async (_e, { filePath, on }) => {
 })
 
 ipcMain.handle('lib:coverFix', async (_e, tracks) => {
+  verifyIpc(_e)
   const list = Array.isArray(tracks) ? tracks.slice(0, 60) : []
   let done = 0, skipped = 0
   const errors = []
@@ -452,6 +517,7 @@ ipcMain.handle('lib:coverFix', async (_e, tracks) => {
 
 ipcMain.handle('lib:delete', async (_e, filePath) => {
   try {
+    verifyIpc(_e)
     const checked = assertInsideLibrary(filePath)
     const base = checked.replace(/\.[^.]+$/, '')
     const targets = [checked, base + '.lrc', base + '.jpg']
@@ -472,20 +538,30 @@ ipcMain.handle('lib:delete', async (_e, filePath) => {
   }
 })
 
-ipcMain.handle('app:info', () => ({
-  version: app.getVersion(),
-  electron: process.versions.electron,
-  chrome: process.versions.chrome,
-  root,
-}))
+ipcMain.handle('app:info', (_e) => {
+  verifyIpc(_e, { allowFloat: true })
+  return {
+    version: app.getVersion(),
+    electron: process.versions.electron,
+    chrome: process.versions.chrome,
+    root,
+  }
+})
 
 // ---------- 无边框窗口控制 ----------
-ipcMain.on('win:minimize', () => win && win.minimize())
-ipcMain.on('win:toggle-max', () => {
+ipcMain.on('win:minimize', (_e) => {
+  try { verifyIpc(_e) } catch { return }
+  if (win) win.minimize()
+})
+ipcMain.on('win:toggle-max', (_e) => {
+  try { verifyIpc(_e) } catch { return }
   if (!win) return
   win.isMaximized() ? win.unmaximize() : win.maximize()
 })
-ipcMain.on('win:close', () => win && win.close())
+ipcMain.on('win:close', (_e) => {
+  try { verifyIpc(_e) } catch { return }
+  if (win) win.close()
+})
 
 
 
@@ -580,9 +656,10 @@ function createFloatWindow() {
     },
   })
   try { if (!tray) createTray() } catch { }
+  hardenWindowNavigation(floatWin.webContents, FLOAT_HTML_PATH)
   floatWin.setAlwaysOnTop(true, 'screen-saver')
   floatWin.setVisibleOnAllWorkspaces(true)
-  floatWin.loadFile(path.join(__dirname, 'renderer', 'float.html'))
+  floatWin.loadFile(FLOAT_HTML_PATH)
   floatWin.webContents.on('did-finish-load', () => {
     if (floatWin && !floatWin.isDestroyed()) {
       floatWin.webContents.send('float:keyinfo', { key: unlockKey, locked: floatLocked })
@@ -596,26 +673,38 @@ function createFloatWindow() {
   return floatWin
 }
 
-ipcMain.handle('float:toggle', () => {
+ipcMain.handle('float:toggle', (_e) => {
+  verifyIpc(_e, { allowFloat: true })
   if (floatWin) { floatWin.close(); floatWin = null; return false }
   createFloatWindow()
   return true
 })
-ipcMain.handle('float:isOpen', () => !!floatWin)
+ipcMain.handle('float:isOpen', (_e) => {
+  verifyIpc(_e, { allowFloat: true })
+  return !!floatWin
+})
 ipcMain.on('float:push', (_e, payload) => {
+  try { verifyIpc(_e) } catch { return }
   if (floatWin && !floatWin.isDestroyed()) floatWin.webContents.send('float:update', payload)
 })
-ipcMain.on('float:lock', (_e, locked) => setFloatLock(locked))
-ipcMain.on('float:menu', () => {
+ipcMain.on('float:lock', (_e, locked) => {
+  try { verifyIpc(_e, { allowFloat: true }) } catch { return }
+  setFloatLock(locked)
+})
+ipcMain.on('float:menu', (_e) => {
+  try { verifyIpc(_e, { allowFloat: true }) } catch { return }
   buildTrayMenu().popup({ window: win || undefined })
 })
 ipcMain.on('float:cmd', (_e, cmd) => {
+  try { verifyIpc(_e, { allowFloat: true }) } catch { return }
   if (win && !win.isDestroyed()) win.webContents.send('player:cmd', cmd)
 })
-ipcMain.on('float:close', () => {
+ipcMain.on('float:close', (_e) => {
+  try { verifyIpc(_e, { allowFloat: true }) } catch { return }
   if (floatWin && !floatWin.isDestroyed()) floatWin.close()
 })
 ipcMain.on('float:resize', (_e, h) => {
+  try { verifyIpc(_e, { allowFloat: true }) } catch { return }
   if (floatWin && !floatWin.isDestroyed()) {
     const b = floatWin.getBounds()
     floatWin.setBounds({ x: b.x, y: b.y + (b.height - h), width: b.width, height: h })
@@ -639,13 +728,14 @@ function createWindow() {
     },
   })
   win.setMenuBarVisibility(false)
+  hardenWindowNavigation(win.webContents, INDEX_HTML_PATH)
   win.once('ready-to-show', () => win.show())
   // 主窗关闭时一并关掉悬浮歌词，避免留下幽灵窗口
   win.on('closed', () => {
     if (floatWin && !floatWin.isDestroyed()) floatWin.close()
     win = null
   })
-  win.loadFile(path.join(__dirname, 'renderer', 'index.html'))
+  win.loadFile(INDEX_HTML_PATH)
 }
 
 let floatLocked = false

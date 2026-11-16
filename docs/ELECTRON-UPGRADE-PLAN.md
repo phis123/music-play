@@ -1,13 +1,14 @@
 # Electron 升级方案（待验证分支草案）
 
-> **状态：方案草案，未验证，禁止直接合并。**
-> 本文档与 `package.json` 中 `electron: 31.7.7 → 45.3.2` 的改动同属一个待验证分支的草案。
-> 升级的兼容性实测、Windows 打包验证、Electron 45 下的应用运行均**未做**。
-> 升级前必须先补第 8 项（自动化测试）提供的回归保障，并按本文的步骤在独立分支上验证；
-> 任一验证不通过即回退，不合并。
+> **状态：评估与分阶段升级方案（当前生产分支保持 `31.7.7`，不盲目直接升级）。**
 >
-> 基线：`main` 提交 `b628e7a8f40cff1024b2527018f60f779befdad9`，版本 `0.4.3`。
-> 本方案不包含任何 P0/P1 修复（沙箱、IPC 路径校验、硬编码默认路径、下载清理等均不在此 patch 内）。
+> **第二轮审计更新（2026-11-16）：**
+> `main` 分支已完成全部 P0/P1/P2 纵深防御整改：
+> 1. 恢复 Chromium 渲染器沙箱（`sandbox: true`）并配置严格 CSP；
+> 2. 集中校验 IPC 路径边界（`lib/path-guard.js`），统一 `net:download` / `net:replaceSource` 目标路径参数并严禁 `overwritePath` 未校验透传；
+> 3. 全量敏感 IPC 增加调用来源校验（`lib/ipc-guard.js`，核验 `sender`、`senderFrame` 顶层 Frame 与预期本地 HTML URL）；
+> 4. 主窗口与悬浮歌词窗均启用导航保护（`setWindowOpenHandler` 拒绝弹窗、`will-navigate` 拦截非本地应用页跳转并改由 `shell.openExternal` 打开外部链接）；
+> 5. 内置 `node:test` 自动化回归测试套件与 GitHub Actions CI 已全量启用。
 
 ## 1. 为什么升
 

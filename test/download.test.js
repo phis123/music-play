@@ -118,3 +118,34 @@ test('中途断开：reject，且不残留半截文件（第 5 项已启用）',
   await assert.rejects(downloadTo(`${base}/x`, file))
   assert.equal(fs.existsSync(file), false, '失败后不应残留半截文件')
 })
+
+test('P1-3 回归：正常结束流但 got < content-length 时，先关闭写流再彻底清理临时文件', async (t) => {
+  const dir = tmpDir(t)
+  const base = await serve(t, (_req, res) => {
+    // 故意用 raw socket 发送声明长度 50 但只给 5 字节并正常 FIN 关闭的场景
+    res.socket.write('HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\nContent-Length: 50\r\nConnection: close\r\n\r\n01234')
+    res.socket.end()
+  })
+  const file = path.join(dir, 'short-fin.mp3.downloading')
+  await assert.rejects(downloadTo(`${base}/x`, file), /下载不完整|aborted|socket|ECONNRESET/i)
+  assert.equal(fs.existsSync(file), false, '写流关闭后临时文件必须被彻底删除')
+})
+
+test('P1-3 回归：拒绝 text/html 与 application/json 错误页且不残留临时文件', async (t) => {
+  const dir = tmpDir(t)
+  const base = await serve(t, (req, res) => {
+    if (req.url === '/html') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<html>error</html>')
+    } else {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end('{"code":403}')
+    }
+  })
+  const f1 = path.join(dir, 'bad1.mp3.downloading')
+  const f2 = path.join(dir, 'bad2.mp3.downloading')
+  await assert.rejects(downloadTo(`${base}/html`, f1), /不是音频/)
+  await assert.rejects(downloadTo(`${base}/json`, f2), /不是音频/)
+  assert.equal(fs.existsSync(f1), false)
+  assert.equal(fs.existsSync(f2), false)
+})
