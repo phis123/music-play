@@ -15,6 +15,6 @@
     "node-id3": "^0.2.9"
   },
   "devDependencies": {
-    "electron": "31.7.7"
+    "electron": "45.3.2"
   }
 }
