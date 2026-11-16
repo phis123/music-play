@@ -143,18 +143,29 @@ function applyLyricsStyle() {
     localStorage.setItem('mob:lrcColor', S.lrcColor || '#ec4141');
   } catch (e) { }
 }
-function pushOverlayStyle() {
-  try {
-    localStorage.setItem('mob:floatColor', S.floatColor);
-    localStorage.setItem('mob:floatSizeSp', String(S.floatSizeSp));
-    localStorage.setItem('mob:floatBgOpacity', String(S.floatBgOpacity));
-    if (A && typeof A.overlaySetStyle === 'function') {
-      const alpha = Math.round((S.floatBgOpacity / 100) * 255);
-      A.overlaySetStyle(S.floatColor, S.floatSizeSp, alpha);
-    } else if (A && typeof A.overlayColor === 'function') {
-      A.overlayColor(S.floatColor);
-    }
-  } catch (e) { }
+let _overlayStyleTimer = null;
+function pushOverlayStyle(immediate) {
+  const applyNow = () => {
+    try {
+      localStorage.setItem('mob:floatColor', S.floatColor);
+      localStorage.setItem('mob:floatSizeSp', String(S.floatSizeSp));
+      localStorage.setItem('mob:floatBgOpacity', String(S.floatBgOpacity));
+      if (A && typeof A.overlaySetStyle === 'function') {
+        const sz = Math.max(12, Math.min(30, Math.round(+S.floatSizeSp || 18)));
+        const alpha = Math.max(0, Math.min(220, Math.round(((+S.floatBgOpacity || 0) / 100) * 255)));
+        A.overlaySetStyle(String(S.floatColor || '#ffffff'), sz, alpha);
+      } else if (A && typeof A.overlayColor === 'function') {
+        A.overlayColor(String(S.floatColor || '#ffffff'));
+      }
+    } catch (e) { }
+  };
+  if (immediate !== false) {
+    clearTimeout(_overlayStyleTimer);
+    applyNow();
+  } else {
+    clearTimeout(_overlayStyleTimer);
+    _overlayStyleTimer = setTimeout(applyNow, 45);
+  }
 }
 
 /* ---------------- 页面切换主线程让出 + 原生后台防冻结定时器 + 全局任务进度中心 (b73) ---------------- */
@@ -2658,7 +2669,7 @@ function sheetHtml() {
 
       <div class="npset-sec">
         <div class="npset-head">
-          <span class="npset-title">♪ 本曲声音平衡（单歌独立微调）</span>
+          <span class="npset-title">♪ 本曲音量平衡（单歌微调）</span>
           <span class="npset-sub" id="mobMiniGainInfo">自动 ${autoDb >= 0 ? '+' : ''}${autoDb.toFixed(1)}dB · 合成 ${totalDb >= 0 ? '+' : ''}${totalDb.toFixed(1)}dB</span>
         </div>
         <div class="npset-row">
@@ -4406,12 +4417,12 @@ document.addEventListener('input', (e) => {
     S.floatSizeSp = +e.target.value || 18;
     const vEl = document.getElementById('mobMiniFloatSzVal');
     if (vEl) vEl.textContent = S.floatSizeSp + 'sp';
-    pushOverlayStyle();
+    pushOverlayStyle(false);
   } else if (e.target.id === 'mobMiniFloatBg') {
     S.floatBgOpacity = +e.target.value || 0;
     const vEl = document.getElementById('mobMiniFloatBgVal');
     if (vEl) vEl.textContent = S.floatBgOpacity + '%';
-    pushOverlayStyle();
+    pushOverlayStyle(false);
   }
 });
 

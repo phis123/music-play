@@ -674,12 +674,12 @@ public class Bridge {
         try {
             int c = 0xFFFFFFFF;
             if (hex != null && !hex.isEmpty()) {
-                c = (int) Long.parseLong(hex.replace("#", ""), 16);
-                if (hex.replace("#", "").length() <= 6) c |= 0xFF000000;
+                String clean = hex.replace("#", "").trim();
+                c = (int) Long.parseLong(clean, 16);
+                if (clean.length() <= 6) c |= 0xFF000000;
             }
-            final int fc = c;
-            mainHandler.post(() -> LyricsOverlay.get(act).setStyle(fc, fontSizeSp, bgAlpha));
-        } catch (Exception ignored) { }
+            LyricsOverlay.get(act).setStyle(c, fontSizeSp, bgAlpha);
+        } catch (Throwable ignored) { }
     }
 
     @JavascriptInterface
