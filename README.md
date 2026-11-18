@@ -1,6 +1,6 @@
 # music-play
 
-**v1.0.1 · 正式版**
+**v1.0.6 · 正式版**
 
 一个专注**双语歌词**的本地音乐播放器——原文一行、译文一行，跟着播放平滑滚动。支持 Windows 桌面端（Electron）与 Android 移动端。
 
@@ -30,7 +30,7 @@ I can't be helped because I love to play the victim
 <堕落天使手持剪刀狂奔，剪断我的三根手指>
 ```
 
-## 功能特性（v1.0.1）
+## 功能特性（v1.0.6）
 
 - **本地曲库管理**：递归扫描音频目录，支持 `mp3 / flac / wav / m4a / ogg / aac / opus`，自动记忆自定义音乐目录；增量扫描缓存（`scan-cache.json`）+ 封面 LRU，648 首曲库秒开
 - **播放控制与队列**：顺序循环 / 单曲循环 / 随机播放，内置可视化播放队列抽屉（当前曲目动态声波指示、插队「下一首播放」、移除与清空）
@@ -61,6 +61,18 @@ I can't be helped because I love to play the victim
 
 ## 更新记录
 
+### v1.0.6
+
+修复「在线试听暂停后点播放不恢复」与「试听时仍显示上一首的封面歌手」。三个根因都在真机上用日志证实：
+
+- **恢复被劫持**：`_restoredNeedsPlay`（上次退出时的会话恢复标志）只在切歌时清除，试听路径从不清除，导致「试听 → 暂停 → 点恢复」实际去重播队列里的本地歌。现在试听开始时即清除，恢复分支再加 `!previewPath` 双保险
+- **播放刚要出声就被自己打断**：`playUrl()` 里 `requestAudioFocus()` 触发的 `LOSS_TRANSIENT` 落到 `onFocusChange()`，那里看到 `playing == true`（上一首的旧值）就 `pause()`，造成「图标显示在播、实际没声音、进度不动」。新增 `preparing` 标记，播放准备期间的焦点变化一律忽略
+- **失败被静默吞掉**：`onError` 直接 `return true`、`catch` 只置标志、服务未就绪时直接丢弃命令。现在都回调 `window.onPlayerError` 并由 `A.diag()` 写入 `Android/data/<pkg>/files/diag.log`（512KB 轮转），logcat 被刷掉也能取证
+- 新增 `A.recover()`：恢复失败时按上次数据源重开并 seek 回暂停位置，前端复核后自动触发一次
+- 试听期间 mini 条与播放页的标题、歌手、封面、时长全部跟随试听；歌手取声音的 `dj / radio` 字段，不再统一显示「在线试听」
+
+真机验证（vivo V2453A / Android 16）：试听 → 暂停 → 恢复 5 轮 4 通过（第 3 轮为试听曲自然播完切换），`diag.log` 5/5 复核通过；10 轮压测 10/10 复核通过。
+
 ### v1.0.1
 
 - **修复安卓端「封面 / 歌手全掉」**：磁盘兜底扫描现在直接读文件内嵌 ID3 标签（歌名 / 歌手 / 专辑 / 时长），并按 `path|size|mtime` 缓存，扫描不重复解标签；系统媒体库返回 `<unknown>` 或不可用时同样用内嵌标签补齐
@@ -73,9 +85,9 @@ I can't be helped because I love to play the victim
 
 | 平台 | 文件 | 说明 |
 |---|---|---|
-| Windows | `music-play-Setup-1.0.1.exe` | 单文件安装程序（默认安装到 `E:\music-play`，可自选） |
-| Android | `music-play-1.0.1.apk` | 支持 Android 7.0+（minSdk 24 / targetSdk 34），可直接侧载安装 |
-| 源码 | `music-play-src-1.0.1.zip` | 桌面端 + Android 端完整源码 |
+| Windows | `music-play-Setup-1.0.1.exe` | 单文件安装程序（默认安装到 `E:\music-play`，可自选）；v1.0.6 未改动桌面端，沿用 v1.0.1 |
+| Android | `music-play-1.0.6.apk` | 支持 Android 7.0+（minSdk 24 / targetSdk 34），可直接侧载安装 |
+| 源码 | `music-play-src-1.0.6.zip` | 桌面端 + Android 端完整源码 |
 
 Android 首次使用请允许「所有文件访问权限」（用于删除 / 写入 `Music/` 目录）与「显示在其他应用上层」（悬浮歌词）；Android 13+ 还需允许通知权限以显示播放控制。
 
