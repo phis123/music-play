@@ -83,6 +83,8 @@ pnpm start
 npm test          # node --test，52 项全绿
 ```
 
+打包（Windows 安装包 / Android APK）见 [docs/BUILD.md](docs/BUILD.md)，其中记录了 aapt2 在 Windows 上把 assets 路径写成反斜杠导致「整页无样式」的陷阱与规避方式。
+
 ## 技术栈
 
 | 层 | 选型 | 理由 |
@@ -104,6 +106,7 @@ netapi.js            网易云接口封装（搜索、歌词、音频地址、�
 assets/              应用图标与内置资源
 android/app/         Android 客户端源码（Java 前台播放服务 + 移动端自适应 UI）
 test/                node --test 单元测试（52 项）
+tools/               打包脚本（build-apk.mjs / music-play.iss）
 docs/                ROADMAP 与阶段验证报告
 ```
 
