@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('api', {
   onScanProgress: (cb) => ipcRenderer.on('library:scan-progress', (_e, p) => cb(p)),
   lyrics: (filePath) => ipcRenderer.invoke('lyrics:get', filePath),
   cover: (filePath) => ipcRenderer.invoke('cover:get', filePath),
+  trackGain: (filePath) => ipcRenderer.invoke('audio:gain', filePath),
   pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
   info: () => ipcRenderer.invoke('app:info'),
   fav: (payload) => ipcRenderer.invoke('lib:fav', payload),
@@ -25,6 +26,7 @@ contextBridge.exposeInMainWorld('api', {
   floatToggle: () => ipcRenderer.invoke('float:toggle'),
   floatIsOpen: () => ipcRenderer.invoke('float:isOpen'),
   floatPush: (payload) => ipcRenderer.send('float:push', payload),
+  floatStyle: (style) => ipcRenderer.send('float:style', style),
   floatLock: (locked) => ipcRenderer.send('float:lock', locked),
   floatClose: () => ipcRenderer.send('float:close'),
   floatResize: (h) => ipcRenderer.send('float:resize', h),
@@ -33,5 +35,6 @@ contextBridge.exposeInMainWorld('api', {
   onFloatKeyinfo: (cb) => ipcRenderer.on('float:keyinfo', (_e, p) => cb(p)),
   onPlayerCmd: (cb) => ipcRenderer.on('player:cmd', (_e, cmd) => cb(cmd)),
   onFloatUpdate: (cb) => ipcRenderer.on('float:update', (_e, p) => cb(p)),
+  onFloatStyle: (cb) => ipcRenderer.on('float:style', (_e, s) => cb(s)),
   onFloatLocked: (cb) => ipcRenderer.on('float:locked', (_e, v) => cb(v)),
 })

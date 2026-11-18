@@ -4,17 +4,23 @@ const $$ = (s) => Array.from(document.querySelectorAll(s))
 const S = {
   color: localStorage.getItem('lyColor') || '#ffffff',
   size: Math.min(44, Math.max(14, +(localStorage.getItem('lySize') || 22))),
+  bgOpacity: Math.min(85, Math.max(0, +(localStorage.getItem('lyBgOpacity') || 0))),
 }
 
 /* ---------- 样式 ---------- */
 function applyStyle(save) {
   document.documentElement.style.setProperty('--ly-color', S.color)
   document.documentElement.style.setProperty('--ly-size', S.size + 'px')
+  document.documentElement.style.setProperty(
+    '--ly-bg',
+    S.bgOpacity > 0 ? `rgba(18, 19, 24, ${(S.bgOpacity / 100).toFixed(2)})` : 'transparent'
+  )
   $('#szVal').textContent = S.size
   $$('.sw').forEach((el) => el.classList.toggle('on', el.dataset.c === S.color))
   if (save) {
     localStorage.setItem('lyColor', S.color)
     localStorage.setItem('lySize', String(S.size))
+    localStorage.setItem('lyBgOpacity', String(S.bgOpacity))
   }
   resize()
 }
@@ -50,6 +56,13 @@ function apply(payload) {
 
 /* ---------- 事件 ---------- */
 window.api?.onFloatUpdate?.(apply)
+window.api?.onFloatStyle?.((st) => {
+  if (!st || typeof st !== 'object') return
+  if (st.color) S.color = st.color
+  if (st.size) S.size = Math.min(44, Math.max(14, +st.size))
+  if (st.bgOpacity != null) S.bgOpacity = Math.min(85, Math.max(0, +st.bgOpacity))
+  applyStyle(true)
+})
 window.api?.onFloatLocked?.((locked) => {
   document.body.classList.toggle('locked', !!locked)
   if (locked) toast(`已锁定 · ${unlockLabel} 解锁`, 4000)

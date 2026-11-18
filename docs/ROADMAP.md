@@ -1,49 +1,25 @@
 # 路线图
 
-## P0 · 技术验证（当前）
+## 已完成
 
-三个风险点，各半天内可验完：
-
-1. **pywebview 能否加载 WebView2 固定版内核**
-   通过 `WEBVIEW2_BROWSER_EXECUTABLE_FOLDER` 指向包内目录，验证窗口正常渲染。
-2. **miniaudio 能否播放目标格式**
-   用 MP3 / FLAC / WAV / OGG 各一首实测；确认 seek、时长读取准确。
-3. **PyInstaller onedir 打包后能独立运行**
-   拷到没装 Python 的机器上跑，确认无缺失 DLL。
-
-## P1 · 自用版（3 天）
-
-- 播放 / 暂停 / 进度 / 音量
-- 目录扫描 + 曲库列表 + 搜索
-- **双语歌词两行渲染 + 平滑滚动**
-- 封面显示
-
-## P2 · 可分发给朋友（1 天）
-
-- 便携 ZIP（解压即用，不写注册表）
-- 使用说明（含 SmartScreen 解除方法）
-- GitHub Actions 自动打包 + Release
-
-## P3 · 打磨（1 天）
-
-- 申请 OSS 免费代码签名（SignPath Foundation）
-- 内置版本检查（GitHub Releases API）
-
-## P4 · Android（可选，5~7 天）
-
-系统 WebView 做 UI + 原生 Foreground Service 播放，复用前端代码。
-
-## 已知风险
-
-| 风险 | 应对 |
+| 版本 | 内容 |
 |---|---|
-| 杀软误报 PyInstaller 产物 | onedir 模式 + 附 SHA256 |
-| SmartScreen 拦截未签名 exe | 说明文档 / OSS 代码签名 |
-| 180MB 包体分发成本 | GitHub Releases + 版本检查 |
-| 固定版内核与系统策略冲突 | 启动探测 + 回退提示 |
+| v0.1 – v0.3 | 曲库扫描、双语歌词渲染与滚动、封面、桌面悬浮窗、播放队列 |
+| v0.4.0 – v0.4.2 | 曲库体检、播放页换声源、批量导入、全局任务进度与报错中心、Android 端后台播放与保活 |
+| v0.4.3 | 第二轮安全审计修复（IPC 来源 / Frame 校验、路径越界与软链防护、下载覆盖路径校验、WebView 导航白名单）、540+ 首大曲库分片渲染优化、`#` 等特殊字符封面 URL 修复、52 项单元测试与 CI |
+| **v1.0.0** | 双端音量平衡（响度归一化）、独立「设置」主界面、三种随机策略、播放页「⚙ 播放设置」单曲微调、安卓悬浮歌词样式与跨线程闪退修复 |
+
+## 后续候选（非承诺）
+
+- 音量平衡：接入整轨 EBU R128（LUFS）精确测算，作为快速估算的兜底
+- 歌词：逐字（QRC / KRC）支持与卡拉 OK 式高亮
+- 曲库：外部歌单导入（网易云 / QQ 音乐链接）、多目录并行管理
+- 桌面端：代码签名（消除 SmartScreen 提示）、内置版本更新检查（GitHub Releases API）
+- Android：MediaSession 与蓝牙设备控制完善、通知栏进度条
 
 ## 决策记录
 
-- **播放内核选 miniaudio 而非 libVLC**：避开 GPL 插件，体积从 80MB 降到 3MB；代价是不支持 AAC/APE/DSD，暂不需要。
-- **UI 用 Web 而非 Qt**：双语歌词的滚动与高亮用 CSS 实现成本最低，且能复用已有前端代码。
-- **许可证 MIT**：项目捆绑微软闭源运行时（WebView2），MIT 可避免 GPL 的再分发争议。
+- **桌面端运行时用 Electron 而非 pywebview + miniaudio**：早期 P0 曾计划 pywebview + PyInstaller，实测 WebView2 固定版内核受系统策略影响不稳定，最终改用 Electron（自带 Chromium 与音频栈），双语歌词的滚动与高亮仍用 CSS 实现。
+- **Android 用系统 WebView + 原生前台服务**：复用同一套前端逻辑，播放交给 `MediaPlayer` + `ForegroundService`，电量与后台稳定性优于纯 Web 方案。
+- **音量平衡先做抽样估算**：整轨解码算 LUFS 对 600+ 首曲库代价过高（分钟级），改为抽样 MP3 `global_gain` 并校准分位数，1ms 级完成，误差经人工试听可接受。
+- **许可证 MIT**：无 GPL 依赖（不捆绑 libVLC / ffmpeg 命令行），便于再分发。

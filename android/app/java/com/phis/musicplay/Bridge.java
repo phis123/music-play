@@ -816,7 +816,7 @@ public class Bridge {
     }
 
     @JavascriptInterface
-    public String buildTag() { return "2026-11-15.12:40-b73"; }
+    public String buildTag() { return "2026-11-18.13:40-v1.0.0"; }
 
     @JavascriptInterface
     public String deviceInfo() {

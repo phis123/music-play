@@ -5,31 +5,36 @@ on:
   push:
     tags: ['v*']
 
+permissions:
+  contents: read
+
 jobs:
-  windows:
-    runs-on: windows-latest
+  verify:
+    name: 单元测试 + 源码归档
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: '3.12'
+          node-version: '20'
 
-      - name: Install dependencies
-        shell: pwsh
+      # 桌面端依赖仅用于运行时（Electron / 音频标签），单测本身不需要安装
+      - name: Run unit tests (Node built-in test runner)
+        run: npm test
+
+      - name: Package source archive
         run: |
-          python -m pip install --upgrade pip
-          if (Test-Path requirements.txt) { pip install -r requirements.txt }
+          mkdir -p dist
+          VERSION="${GITHUB_REF_NAME:-snapshot}"
+          tar -czf "dist/music-play-src-${VERSION}.tar.gz" \
+            --exclude='node_modules' --exclude='.git' --exclude='dist' \
+            main.js preload.js netapi.js lib renderer assets android test docs package.json README.md LICENSE
 
-      - name: Build with PyInstaller
-        shell: pwsh
-        run: |
-          pip install pyinstaller
-          if (Test-Path build.spec) { pyinstaller --noconfirm build.spec } else { Write-Host 'build.spec 尚未创建，跳过打包' }
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: music-play-windows
-          path: dist/**
-          if-no-files-found: warn
+          name: music-play-source
+          path: dist/*
+
+  # 说明：Windows 安装包与 Android APK 需要本机工具链（Electron 二进制 / Android SDK + 签名密钥），
+  # 当前由发行者在本地构建后附加到 GitHub Release，CI 只负责单测与源码归档，避免无意义的红叉。

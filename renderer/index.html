@@ -23,7 +23,6 @@
   <aside id="sidebar">
     <div class="side-head">
       <span class="brand">music-play</span>
-      <button id="btnPickFolder" title="选择音乐文件夹">📁</button>
     </div>
     <div class="side-scroll">
       <nav class="nav-group">
@@ -36,18 +35,12 @@
         <a class="nav-item" data-route="#/recent"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 7.6V12l3 1.8"/></svg></span><span>最近播放</span></a>
         <a class="nav-item" data-route="#/local"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="2.2"/><path d="M7.5 5v5.5h9V5"/><path d="M7.5 14.5h9"/></svg></span><span>本地音乐</span></a>
         <a class="nav-item" data-route="#/import"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10"/><path d="M8 10l4 4 4-4"/><path d="M5 18h14"/></svg></span><span>批量导入</span></a>
-        <a class="nav-item" data-route="#/health"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg></span><span>曲库体检</span></a>
+        <a class="nav-item" data-route="#/settings"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span><span>设置</span></a>
       </nav>
       <nav class="nav-group">
         <div class="group-label">歌单 <button id="btnNewPlaylist" title="新建歌单">＋</button></div>
         <div id="plList"></div>
       </nav>
-    </div>
-    <div class="side-foot">
-      <button id="btnTheme" class="side-theme-btn" title="切换外观主题（浅色 / 深色 / 跟随系统）">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2"/></svg>
-        <span id="themeLabel">外观：跟随系统</span>
-      </button>
     </div>
   </aside>
 
@@ -62,14 +55,13 @@
     <div class="lp-head">
       <button id="lpBack" title="返回（Esc）">←</button>
       <span class="lp-head-title" id="lpHeadSub">正在播放</span>
-      <span class="off-group">
-        <button id="offDown" title="歌词提前 0.1 秒（快捷键 [）">−</button>
-        <span id="lpOff" class="chip" title="点击重置歌词偏移为 0.0s">偏移 0.0s</span>
-        <button id="offUp" title="歌词延后 0.1 秒（快捷键 ]）">＋</button>
-      </span>
-      <button id="lpSwitchSource" class="lp-src-btn" title="更换当前歌曲声源（试听并替换音频文件）">⇄ 更换声源</button>
+      <span id="lpGainBadge" class="chip" style="margin-left:auto" title="当前曲目生效的音量平衡补偿">均衡 0.0dB</span>
       <span id="lpSrc" class="chip">—</span>
+      <button id="lpSwitchSource" class="lp-src-btn" title="更换当前歌曲声源（试听并替换音频文件）">⇄ 更换声源</button>
+      <button id="lpGearBtn" class="lp-src-btn lp-gear-btn" title="本曲设置（单曲音量平衡 / 歌词延迟 / 悬浮歌词设计）">⚙ 播放设置</button>
     </div>
+    <!-- 播放页内嵌小设置浮层（单曲声音平衡 / 歌词延迟 / 悬浮歌词设计） -->
+    <div id="lpMiniPanel" class="lp-mini-panel hidden"></div>
     <div class="lp-body">
       <div class="lp-left">
         <div class="lp-disc"><div class="lp-cover" id="lpCover"></div></div>
@@ -79,6 +71,7 @@
           <button id="lpFav" class="lp-act-btn" title="喜欢">♥ 喜欢</button>
           <button id="lpSourceBtn" class="lp-act-btn pri" title="搜索并替换当前歌曲声源">⇄ 换声源</button>
           <button id="lpAddPl" class="lp-act-btn" title="加入歌单">＋ 加歌单</button>
+          <button id="lpMiniBtn2" class="lp-act-btn" title="调整本曲音量平衡、歌词延迟与悬浮歌词">⚙ 调音/歌词</button>
         </div>
       </div>
       <div class="lp-right">

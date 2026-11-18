@@ -35,6 +35,150 @@ const state = {
   listSort: 'default',
   healthTab: 'dup',
   task: { active: false, kind: '', title: '', sub: '', done: 0, total: 0, ok: 0, fail: 0, errors: [], indet: false, stopLabel: '' },
+  // 0.4.4：主设置（音量平衡 / 随机策略 / 歌词字号与配色）+ 悬浮歌词样式 + 单曲设置
+  normEnabled: (function () { try { const v = localStorage.getItem('desk:normEnabled'); return v == null ? true : v === '1' } catch { return true } })(),
+  normPreset: (function () { try { return localStorage.getItem('desk:normPreset') || 'standard' } catch { return 'standard' } })(),
+  randomStrategy: (function () { try { return localStorage.getItem('desk:randomStrategy') || 'no-repeat' } catch { return 'no-repeat' } })(),
+  shufflePlayed: new Set(),
+  lrcSize: (function () { try { return Math.min(28, Math.max(14, +(localStorage.getItem('desk:lrcSize') || 18))) } catch { return 18 } })(),
+  lrcColor: (function () { try { return localStorage.getItem('desk:lrcColor') || '#ec4141' } catch { return '#ec4141' } })(),
+  floatColor: (function () { try { return localStorage.getItem('lyColor') || '#ffffff' } catch { return '#ffffff' } })(),
+  floatSize: (function () { try { return Math.min(40, Math.max(14, +(localStorage.getItem('lySize') || 22))) } catch { return 22 } })(),
+  floatBgOpacity: (function () { try { return Math.min(80, Math.max(0, +(localStorage.getItem('lyBgOpacity') || 0))) } catch { return 0 } })(),
+  floatLocked: false,
+  lpMiniOpen: false,
+}
+
+/* ---------------- 音量平衡 WebAudio 管线 + 单曲增益/播放计数/歌词外观 ---------------- */
+let _audioCtx = null
+let _gainNode = null
+let _compNode = null
+
+function ensureWebAudioGraph() {
+  if (_audioCtx && _gainNode) return true
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext
+    if (!AC || !audio) return false
+    _audioCtx = new AC()
+    const src = _audioCtx.createMediaElementSource(audio)
+    _gainNode = _audioCtx.createGain()
+    _compNode = _audioCtx.createDynamicsCompressor()
+    // 透明防破音软限幅器参数（仅在放大偏小音源遇到瞬态鼓点峰值时防削波）
+    _compNode.threshold.value = -2.5
+    _compNode.knee.value = 6.0
+    _compNode.ratio.value = 12.0
+    _compNode.attack.value = 0.003
+    _compNode.release.value = 0.16
+    src.connect(_gainNode)
+    _gainNode.connect(_compNode)
+    _compNode.connect(_audioCtx.destination)
+    return true
+  } catch (e) {
+    console.warn('WebAudio 管线初始化失败:', e)
+    return false
+  }
+}
+
+function getTrackGainMap() {
+  try { return JSON.parse(localStorage.getItem('desk:trackGainMap') || '{}') } catch { return {} }
+}
+function getUserTrackGain(path) {
+  if (!path) return 0
+  const m = getTrackGainMap()
+  const v = Number(m[path])
+  return Number.isFinite(v) ? Math.max(-12, Math.min(12, Math.round(v * 10) / 10)) : 0
+}
+function setUserTrackGain(path, db) {
+  if (!path) return
+  const m = getTrackGainMap()
+  const val = Math.max(-12, Math.min(12, Math.round((+db || 0) * 10) / 10))
+  if (Math.abs(val) < 0.05) delete m[path]
+  else m[path] = val
+  try { localStorage.setItem('desk:trackGainMap', JSON.stringify(m)) } catch { }
+}
+function clearAllUserTrackGains() {
+  try { localStorage.removeItem('desk:trackGainMap') } catch { }
+}
+
+function getPlayCounts() {
+  try { return JSON.parse(localStorage.getItem('desk:playCounts') || '{}') } catch { return {} }
+}
+function getPlayCount(path) {
+  if (!path) return 0
+  return +(getPlayCounts()[path] || 0)
+}
+function incPlayCount(path) {
+  if (!path) return
+  const m = getPlayCounts()
+  m[path] = (m[path] || 0) + 1
+  try { localStorage.setItem('desk:playCounts', JSON.stringify(m)) } catch { }
+}
+
+function getCurrentTrackEffectiveGain() {
+  const t = state.tracks[state.cur]
+  if (!t) return { autoDb: 0, manualDb: 0, totalDb: 0 }
+  const autoDb = Number.isFinite(Number(t.gainDb)) ? Number(t.gainDb) : 0
+  const manualDb = getUserTrackGain(t.path)
+  if (!state.normEnabled) {
+    const tot = Math.max(-15, Math.min(15, Math.round(manualDb * 10) / 10))
+    return { autoDb, manualDb, totalDb: tot }
+  }
+  const presetOff = state.normPreset === 'night' ? -2.5 : state.normPreset === 'boost' ? 2.0 : 0
+  const tot = Math.max(-15, Math.min(15, Math.round((autoDb + presetOff + manualDb) * 10) / 10))
+  return { autoDb, manualDb, totalDb: tot }
+}
+
+function applyCurrentTrackGain() {
+  const { autoDb, manualDb, totalDb } = getCurrentTrackEffectiveGain()
+  const linear = Math.pow(10, totalDb / 20)
+  if (ensureWebAudioGraph() && _gainNode) {
+    if (_audioCtx && _audioCtx.state === 'suspended' && !audio.paused) {
+      _audioCtx.resume().catch(() => {})
+    }
+    try {
+      _gainNode.gain.setTargetAtTime(linear, _audioCtx.currentTime, 0.03)
+    } catch {
+      _gainNode.gain.value = linear
+    }
+  }
+  const badge = $('#lpGainBadge')
+  if (badge) {
+    const sign = totalDb > 0 ? '+' : ''
+    badge.textContent = (state.normEnabled || manualDb !== 0)
+      ? `均衡 ${sign}${totalDb.toFixed(1)}dB`
+      : '均衡 关闭'
+    badge.style.color = manualDb !== 0 ? 'var(--red)' : ''
+  }
+  const t = state.tracks[state.cur]
+  if (t && $('#pbArtist')) {
+    const eqTxt = (state.normEnabled && Math.abs(totalDb) >= 0.1) || manualDb !== 0
+      ? ` · 均衡 ${totalDb > 0 ? '+' : ''}${totalDb.toFixed(1)}dB`
+      : ''
+    $('#pbArtist').textContent = (t.artist || '未知艺人') + (t.bitrate ? ` · ${t.bitrate}k` : '') + eqTxt
+  }
+  return { autoDb, manualDb, totalDb }
+}
+
+function applyLyricsStyle() {
+  document.documentElement.style.setProperty('--lrc-size', (state.lrcSize || 18) + 'px')
+  document.documentElement.style.setProperty('--lrc-accent', state.lrcColor || '#ec4141')
+  try {
+    localStorage.setItem('desk:lrcSize', String(state.lrcSize || 18))
+    localStorage.setItem('desk:lrcColor', state.lrcColor || '#ec4141')
+  } catch { }
+}
+
+function pushFloatStyle() {
+  try {
+    localStorage.setItem('lyColor', state.floatColor)
+    localStorage.setItem('lySize', String(state.floatSize))
+    localStorage.setItem('lyBgOpacity', String(state.floatBgOpacity))
+  } catch { }
+  window.api?.floatStyle?.({
+    color: state.floatColor,
+    size: state.floatSize,
+    bgOpacity: state.floatBgOpacity,
+  })
 }
 
 /* ---------------- 换页主线程让出 + 全局任务进度与报错中心 (0.4.3) ---------------- */
@@ -1602,15 +1746,201 @@ function viewLocal() {
     actsHtml: `
       <button class="btn-sm primary" data-list-playall="1">▶ 播放全部</button>
       <button class="btn-sm" data-list-shuffle="1">🔀 随机播放</button>
-      <button id="btnRescan" class="btn-sm">🔄 重新扫描</button>
-      <button id="btnPickRoot" class="btn-sm">📁 选择目录</button>
-      <button id="btnFixCover" class="btn-sm">补高清封面</button>
-      <button id="btnImport" class="btn-sm">批量导入</button>`,
+      <button id="btnRescan" class="btn-sm">🔄 刷新扫描</button>
+      <button id="btnGoSettings" class="btn-sm">⚙ 目录与设置</button>`,
   })
   if (!list.length) {
-    return hero + `<div class="empty-note"><div class="big">当前目录还没有音频文件</div><div>可点击上方「📁 选择目录」切换音乐文件夹，或点「批量导入」下载歌曲</div></div>`
+    return hero + `<div class="empty-note"><div class="big">当前目录还没有音频文件</div><div>可点击上方「⚙ 目录与设置」切换音乐文件夹，或前往「批量导入」下载歌曲</div></div>`
   }
   return hero + listToolbarHtml() + `<div id="listBody">${renderCurrentListRowsHtml()}</div>`
+}
+
+/* ---------------- 独立主设置界面 (#/settings) ---------------- */
+function viewSettings() {
+  const gainMapCount = Object.keys(getTrackGainMap()).length
+  const playCountsCount = Object.keys(getPlayCounts()).length
+  const lrcColors = [
+    ['#ec4141', '网易珊瑚红'],
+    ['#4da3ff', '极光冰蓝'],
+    ['#10b981', '翡翠森林'],
+    ['#f59e0b', '流光琥珀'],
+    ['#a855f7', '霓虹紫晶'],
+    ['#ffffff', '纯净高对比'],
+  ]
+  return `<div class="set-wrap">
+    <div class="page-head">
+      <div>
+        <div class="page-title">设置</div>
+        <div class="page-sub">统一管理曲库与下载目录、音量平衡、随机播放算法、歌词外观与低频维护工具</div>
+      </div>
+    </div>
+
+    <div class="set-card">
+      <div class="set-card-head">
+        <div>
+          <div class="set-card-title">📁 曲库与下载目录</div>
+          <div class="set-card-desc">在线下载与批量导入的歌曲、旁挂双语歌词 (.lrc) 与封面将自动保存在此目录</div>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-row-main">
+          <div class="set-row-label">当前音乐目录（共 ${state.tracks.length} 首）</div>
+          <div class="set-row-sub">${esc(state.root || '默认系统音乐目录')}</div>
+        </div>
+        <div class="set-row-ctrl">
+          <button class="btn-sm primary" id="setPickRootBtn">📁 更改目录</button>
+          <button class="btn-sm" id="setRescanBtn">🔄 重新扫描</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="set-card">
+      <div class="set-card-head">
+        <div>
+          <div class="set-card-title">♪ 音量平衡（Loudness Normalization）</div>
+          <div class="set-card-desc">基于 MP3 帧增益分析 + WebAudio 增益与软限幅器，自动消除不同播客音源声音忽大忽小的问题</div>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-row-main">
+          <div class="set-row-label">自动音量平衡</div>
+          <div class="set-row-sub">开启后将过响曲目平滑衰减、过轻音源自动放大并防破音（可在播放页「⚙ 播放设置」对单首歌独立微调）</div>
+        </div>
+        <div class="set-row-ctrl">
+          <div class="set-seg">
+            <button data-set-norm="1" class="${state.normEnabled ? 'on' : ''}">开启</button>
+            <button data-set-norm="0" class="${!state.normEnabled ? 'on' : ''}">关闭</button>
+          </div>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-row-main">
+          <div class="set-row-label">目标响度基准</div>
+          <div class="set-row-sub">标准模式对齐主流流媒体（-14 LUFS）；夜间模式更柔和护耳；增强模式适合偏轻音源</div>
+        </div>
+        <div class="set-row-ctrl">
+          <div class="set-seg">
+            <button data-set-preset="standard" class="${state.normPreset === 'standard' ? 'on' : ''}">标准 (-14 LUFS)</button>
+            <button data-set-preset="night" class="${state.normPreset === 'night' ? 'on' : ''}">轻柔夜间 (-17 LUFS)</button>
+            <button data-set-preset="boost" class="${state.normPreset === 'boost' ? 'on' : ''}">人声增强 (-12 LUFS)</button>
+          </div>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-row-main">
+          <div class="set-row-label">单曲独立增益微调记录</div>
+          <div class="set-row-sub">已为 ${gainMapCount} 首歌曲单独保存了音量微调偏好</div>
+        </div>
+        <div class="set-row-ctrl">
+          <button class="btn-sm" id="setClearTrackGains" ${gainMapCount ? '' : 'disabled'}>清空单曲微调</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="set-card">
+      <div class="set-card-head">
+        <div>
+          <div class="set-card-title">🔀 随机播放策略</div>
+          <div class="set-card-desc">控制切换至「随机播放」模式时的下一首抽取算法</div>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-row-main">
+          <div class="set-row-label">随机抽选模式</div>
+          <div class="set-row-sub">
+            ${state.randomStrategy === 'no-repeat'
+              ? '不重复随机：当前队列所有歌曲全部听完一遍前绝不重复抽中同一首（推荐）'
+              : state.randomStrategy === 'rare-first'
+                ? '不常听优先：结合本地播放次数统计，优先随机抽选平时少听或未听过的歌曲'
+                : '真随机：每次切歌完全独立随机抽取（像掷骰子一样，可能短时间内再次抽中）'}
+          </div>
+        </div>
+        <div class="set-row-ctrl">
+          <div class="set-seg">
+            <button data-set-rand="no-repeat" class="${state.randomStrategy === 'no-repeat' ? 'on' : ''}">不重复随机</button>
+            <button data-set-rand="rare-first" class="${state.randomStrategy === 'rare-first' ? 'on' : ''}">不常听随机</button>
+            <button data-set-rand="true-random" class="${state.randomStrategy === 'true-random' ? 'on' : ''}">真随机</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="set-card">
+      <div class="set-card-head">
+        <div>
+          <div class="set-card-title">🎨 歌词外观（字体大小与高亮颜色）</div>
+          <div class="set-card-desc">调整歌曲播放页双语歌词的字号与当前句高亮色彩</div>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-row-main">
+          <div class="set-row-label">歌词字号大小</div>
+          <div class="set-row-sub">支持预设档位或滑块无级调节（14px ~ 28px）</div>
+        </div>
+        <div class="set-row-ctrl">
+          <div class="set-seg">
+            <button data-set-lrcsz="15" class="${state.lrcSize === 15 ? 'on' : ''}">小</button>
+            <button data-set-lrcsz="18" class="${state.lrcSize === 18 ? 'on' : ''}">标准</button>
+            <button data-set-lrcsz="21" class="${state.lrcSize === 21 ? 'on' : ''}">大</button>
+            <button data-set-lrcsz="25" class="${state.lrcSize === 25 ? 'on' : ''}">特大</button>
+          </div>
+          <div class="set-range-wrap">
+            <input type="range" id="setLrcSizeRange" min="14" max="28" step="1" value="${state.lrcSize}">
+            <span class="set-val-badge" id="setLrcSizeVal">${state.lrcSize}px</span>
+          </div>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-row-main">
+          <div class="set-row-label">当前句高亮配色</div>
+          <div class="set-row-sub">点击预设色圆点或右侧取色器自定义颜色</div>
+        </div>
+        <div class="set-row-ctrl">
+          <div class="set-swatches">
+            ${lrcColors.map(([c, name]) => `<span class="set-swatch${state.lrcColor.toLowerCase() === c ? ' on' : ''}" data-set-lrccolor="${c}" title="${name}" style="background:${c}"></span>`).join('')}
+            <input type="color" id="setLrcColorPicker" value="${esc(state.lrcColor)}" title="自定义颜色" style="width:28px;height:28px;border:0;background:transparent;cursor:pointer">
+          </div>
+        </div>
+      </div>
+      <div class="set-preview-box">
+        <div id="setLrcPreviewEn" style="font-size:${state.lrcSize + 2}px;color:${esc(state.lrcColor)};font-weight:700">Can we pretend we're not angels through a cable?</div>
+        <div id="setLrcPreviewZh" style="font-size:${state.lrcSize}px;color:${esc(state.lrcColor)};font-weight:700;margin-top:4px">我们能否假装自己不是隔着网线相望的天使？</div>
+      </div>
+    </div>
+
+    <div class="set-card">
+      <div class="set-card-head">
+        <div>
+          <div class="set-card-title">🛠 界面外观与非常用维护工具</div>
+          <div class="set-card-desc">将低频工具集中收纳，保持日常听歌界面干净清爽</div>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-row-main">
+          <div class="set-row-label">界面外观主题</div>
+          <div class="set-row-sub">切换浅色、深色或跟随系统深浅色</div>
+        </div>
+        <div class="set-row-ctrl">
+          <div class="set-seg">
+            <button data-set-theme="auto" class="${state.theme === 'auto' ? 'on' : ''}">跟随系统</button>
+            <button data-set-theme="light" class="${state.theme === 'light' ? 'on' : ''}">浅色模式</button>
+            <button data-set-theme="dark" class="${state.theme === 'dark' ? 'on' : ''}">深色模式</button>
+          </div>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-row-main">
+          <div class="set-row-label">曲库维护与整理</div>
+          <div class="set-row-sub">检测疑似重复歌曲、缺失歌词、缺封面或异常短音频（已累计记录 ${playCountsCount} 首歌播放频次）</div>
+        </div>
+        <div class="set-row-ctrl">
+          <button class="btn-sm primary" id="setOpenHealthBtn">🩺 打开曲库体检</button>
+          <button class="btn-sm" id="setFixCoversBtn">✦ 批量补高清封面</button>
+          <button class="btn-sm" id="setClearStatsBtn">🧹 清空搜索与播放统计</button>
+        </div>
+      </div>
+    </div>
+  </div>`
 }
 
 /* ---------------- 曲库体检视图 (Phase 3) ---------------- */
@@ -1740,6 +2070,7 @@ const routes = {
   '#/local': viewLocal,
   '#/import': viewImport,
   '#/health': viewHealth,
+  '#/settings': viewSettings,
 }
 
 let __actsBound = false
@@ -1833,6 +2164,85 @@ function bindRowActions() {
       healthFixAll()
       return
     }
+    // 主设置页 (#/settings) 事件委托
+    const normBtn = e.target.closest('[data-set-norm]')
+    if (normBtn) {
+      state.normEnabled = normBtn.dataset.setNorm === '1'
+      try { localStorage.setItem('desk:normEnabled', state.normEnabled ? '1' : '0') } catch { }
+      applyCurrentTrackGain()
+      render()
+      toast(state.normEnabled ? '已开启全局音量平衡' : '已关闭全局音量平衡')
+      return
+    }
+    const presetBtn = e.target.closest('[data-set-preset]')
+    if (presetBtn) {
+      state.normPreset = presetBtn.dataset.setPreset || 'standard'
+      try { localStorage.setItem('desk:normPreset', state.normPreset) } catch { }
+      applyCurrentTrackGain()
+      render()
+      return
+    }
+    const randBtn = e.target.closest('[data-set-rand]')
+    if (randBtn) {
+      state.randomStrategy = randBtn.dataset.setRand || 'no-repeat'
+      state.shufflePlayed.clear()
+      try { localStorage.setItem('desk:randomStrategy', state.randomStrategy) } catch { }
+      paintPlayMode()
+      render()
+      const rNames = { 'no-repeat': '不重复随机', 'rare-first': '不常听优先随机', 'true-random': '真随机' }
+      toast('随机策略已切换为：' + (rNames[state.randomStrategy] || '不重复随机'))
+      return
+    }
+    const lrcSzBtn = e.target.closest('[data-set-lrcsz]')
+    if (lrcSzBtn) {
+      state.lrcSize = +lrcSzBtn.dataset.setLrcsz || 18
+      applyLyricsStyle()
+      render()
+      return
+    }
+    const lrcColBtn = e.target.closest('[data-set-lrccolor]')
+    if (lrcColBtn) {
+      state.lrcColor = lrcColBtn.dataset.setLrccolor || '#ec4141'
+      applyLyricsStyle()
+      render()
+      return
+    }
+    const themeBtn = e.target.closest('[data-set-theme]')
+    if (themeBtn) {
+      applyTheme(themeBtn.dataset.setTheme || 'auto')
+      render()
+      return
+    }
+    if (e.target.closest('#setPickRootBtn')) {
+      pickRoot()
+      return
+    }
+    if (e.target.closest('#setRescanBtn')) {
+      rescan(true).then(() => render())
+      return
+    }
+    if (e.target.closest('#setClearTrackGains')) {
+      clearAllUserTrackGains()
+      applyCurrentTrackGain()
+      render()
+      toast('已清空全部单曲音量微调记录')
+      return
+    }
+    if (e.target.closest('#setOpenHealthBtn')) {
+      location.hash = '#/health'
+      return
+    }
+    if (e.target.closest('#setFixCoversBtn')) {
+      fixCovers()
+      return
+    }
+    if (e.target.closest('#setClearStatsBtn')) {
+      clearSearchHist()
+      try { localStorage.removeItem('desk:playCounts') } catch { }
+      render()
+      toast('已清空搜索历史与播放次数统计')
+      return
+    }
   })
   view.addEventListener('input', (e) => {
     if (e.target.id === 'listFilterInput') {
@@ -1841,6 +2251,22 @@ function bindRowActions() {
     } else if (e.target.id === 'searchInput') {
       search.kw = e.target.value
       updateHomeSearchBody()
+    } else if (e.target.id === 'setLrcSizeRange') {
+      state.lrcSize = +e.target.value || 18
+      applyLyricsStyle()
+      const badge = $('#setLrcSizeVal')
+      if (badge) badge.textContent = state.lrcSize + 'px'
+      const pEn = $('#setLrcPreviewEn')
+      const pZh = $('#setLrcPreviewZh')
+      if (pEn) pEn.style.fontSize = (state.lrcSize + 2) + 'px'
+      if (pZh) pZh.style.fontSize = state.lrcSize + 'px'
+    } else if (e.target.id === 'setLrcColorPicker') {
+      state.lrcColor = e.target.value || '#ec4141'
+      applyLyricsStyle()
+      const pEn = $('#setLrcPreviewEn')
+      const pZh = $('#setLrcPreviewZh')
+      if (pEn) pEn.style.color = state.lrcColor
+      if (pZh) pZh.style.color = state.lrcColor
     }
   })
 }
@@ -2027,6 +2453,7 @@ function render() {
     $('#btnPickRoot')?.addEventListener('click', pickRoot)
     $('#btnFixCover')?.addEventListener('click', fixCovers)
     $('#btnImport')?.addEventListener('click', () => { location.hash = '#/import' })
+    $('#btnGoSettings')?.addEventListener('click', () => { location.hash = '#/settings' })
   }
   if (hash === '#/health') {
     $$('#view .track-row').forEach((el) => el.addEventListener('click', () => play(+el.dataset.i)))
@@ -2170,6 +2597,39 @@ function playNextInsert(t) {
   toast('已设为下一首播放：' + cleanTitle(t.title))
 }
 
+function pickNextShuffleIndex() {
+  const n = state.queuePaths.length
+  if (n <= 1) return 0
+  const strat = state.randomStrategy || 'no-repeat'
+  if (strat === 'true-random') {
+    let idx = state.qPos
+    while (idx === state.qPos) idx = Math.floor(Math.random() * n)
+    return idx
+  }
+  // 不重复随机 / 不常听优先随机：本轮未播池
+  if (state.qPos >= 0) state.shufflePlayed.add(state.queuePaths[state.qPos])
+  let unplayed = []
+  for (let i = 0; i < n; i++) {
+    if (i !== state.qPos && !state.shufflePlayed.has(state.queuePaths[i])) {
+      unplayed.push(i)
+    }
+  }
+  if (!unplayed.length) {
+    state.shufflePlayed.clear()
+    if (state.qPos >= 0) state.shufflePlayed.add(state.queuePaths[state.qPos])
+    for (let i = 0; i < n; i++) {
+      if (i !== state.qPos) unplayed.push(i)
+    }
+  }
+  if (strat === 'rare-first' && unplayed.length > 1) {
+    // 按播放次数升序排序，从播放最少的前 35% 池中随机抽取
+    unplayed.sort((a, b) => getPlayCount(state.queuePaths[a]) - getPlayCount(state.queuePaths[b]))
+    const poolSize = Math.max(1, Math.ceil(unplayed.length * 0.35))
+    return unplayed[Math.floor(Math.random() * poolSize)]
+  }
+  return unplayed[Math.floor(Math.random() * unplayed.length)]
+}
+
 function stepQueue(delta, autoEnded) {
   if (!state.queuePaths.length && state.tracks.length) {
     state.queuePaths = state.tracks.map((t) => t.path)
@@ -2182,10 +2642,7 @@ function stepQueue(delta, autoEnded) {
     audio.play().catch(() => {})
     return
   } else if (state.mode === 'shuffle' && delta > 0) {
-    if (state.queuePaths.length === 1) nextPos = 0
-    else {
-      do { nextPos = Math.floor(Math.random() * state.queuePaths.length) } while (nextPos === state.qPos)
-    }
+    nextPos = pickNextShuffleIndex()
     state.hist.push(state.qPos)
     if (state.hist.length > 200) state.hist.shift()
   } else if (state.mode === 'shuffle' && delta < 0 && state.hist.length) {
@@ -2215,8 +2672,19 @@ async function playTrack(t, i, opts = {}) {
   pushRecent(t)
 
   stopPreview()
+  if (opts.autoPlay !== false) incPlayCount(t.path)
+  if (typeof t.gainDb !== 'number' && window.api && window.api.trackGain) {
+    window.api.trackGain(t.path).then((g) => {
+      t.gainDb = Number(g) || 0
+      if (state.tracks[state.cur] === t) {
+        applyCurrentTrackGain()
+        if (state.lpMiniOpen) renderLpMiniPanel()
+      }
+    }).catch(() => {})
+  }
   audio.src = toFileUrl(t.path) + (opts.bustCache ? `?t=${Date.now()}` : '')
   applyVolume(state.vol, state.muted)
+  applyCurrentTrackGain()
   if (opts.restoreSec && opts.restoreSec > 0) {
     audio.addEventListener('loadedmetadata', function onMeta() {
       audio.removeEventListener('loadedmetadata', onMeta)
@@ -2832,11 +3300,13 @@ function pushFloat() {
 /* ---------------- 歌词页 ---------------- */
 function updateOffsetChip() {
   const el = $('#lpOff')
-  if (!el) return
-  const ms = Math.round(state.offsetMs || 0)
-  el.textContent = '偏移 ' + (ms > 0 ? '+' : '') + (ms / 1000).toFixed(1) + 's'
-  el.style.color = ms ? 'var(--red)' : ''
-  el.style.borderColor = ms ? 'var(--red)' : ''
+  if (el) {
+    const ms = Math.round(state.offsetMs || 0)
+    el.textContent = '偏移 ' + (ms > 0 ? '+' : '') + (ms / 1000).toFixed(1) + 's'
+    el.style.color = ms ? 'var(--red)' : ''
+    el.style.borderColor = ms ? 'var(--red)' : ''
+  }
+  if (state.lpMiniOpen) renderLpMiniPanel()
 }
 
 function nudgeOffset(deltaMs) {
@@ -2847,7 +3317,96 @@ function nudgeOffset(deltaMs) {
   updateOffsetChip()
   syncLyrics(true)
 }
-function openLyrics() {
+
+/* ---------------- 歌曲播放页小设置浮层（单曲声音平衡 / 歌词延迟 / 悬浮歌词设计） ---------------- */
+function renderLpMiniPanel() {
+  const box = $('#lpMiniPanel')
+  if (!box) return
+  box.classList.toggle('hidden', !state.lpMiniOpen)
+  $('#lpGearBtn')?.classList.toggle('on', !!state.lpMiniOpen)
+  $('#lpMiniBtn2')?.classList.toggle('on', !!state.lpMiniOpen)
+  if (!state.lpMiniOpen) return
+
+  const t = state.tracks[state.cur]
+  const { autoDb, manualDb, totalDb } = getCurrentTrackEffectiveGain()
+  const offSec = ((state.offsetMs || 0) / 1000).toFixed(1)
+  const floatSwatches = ['#ffffff', '#ec4141', '#4da3ff', '#ffd54a', '#4ade80', '#ff8ad4', '#c084fc', '#111114']
+
+  box.innerHTML = `
+    <div class="lp-mini-sec">
+      <div class="lp-mini-head">
+        <span class="lp-mini-title">♪ 本曲声音平衡（单歌独立调整）</span>
+        <span class="lp-mini-sub" id="lpMiniGainInfo">自动 ${autoDb >= 0 ? '+' : ''}${autoDb.toFixed(1)}dB · 合成 ${totalDb >= 0 ? '+' : ''}${totalDb.toFixed(1)}dB</span>
+      </div>
+      <div class="lp-mini-row">
+        <span style="font-size:12px;color:var(--dim)">本曲微调</span>
+        <input type="range" id="lpMiniGainRange" min="-12" max="12" step="0.5" value="${manualDb}">
+        <span class="set-val-badge" id="lpMiniGainVal">${manualDb > 0 ? '+' : ''}${manualDb.toFixed(1)}dB</span>
+      </div>
+      <div class="lp-mini-chips">
+        <button class="lp-mini-chip" data-mini-gain="-1.5">-1.5dB</button>
+        <button class="lp-mini-chip" data-mini-gain="-0.5">-0.5dB</button>
+        <button class="lp-mini-chip${manualDb === 0 ? ' on' : ''}" data-mini-gain="reset">重置 0dB</button>
+        <button class="lp-mini-chip" data-mini-gain="0.5">+0.5dB</button>
+        <button class="lp-mini-chip" data-mini-gain="1.5">+1.5dB</button>
+        <button class="lp-mini-chip${state.normEnabled ? ' on' : ''}" data-mini-normtoggle="1" style="margin-left:auto">${state.normEnabled ? '全局均衡:开' : '全局均衡:关'}</button>
+      </div>
+    </div>
+
+    <div class="lp-mini-sec">
+      <div class="lp-mini-head">
+        <span class="lp-mini-title">⏱ 本曲歌词延迟微调</span>
+        <span class="lp-mini-sub" id="lpMiniOffVal">当前偏移 ${state.offsetMs > 0 ? '+' : ''}${offSec}s</span>
+      </div>
+      <div class="lp-mini-row">
+        <span style="font-size:12px;color:var(--dim)">时间轴</span>
+        <input type="range" id="lpMiniOffRange" min="-5000" max="5000" step="100" value="${Math.max(-5000, Math.min(5000, state.offsetMs || 0))}">
+      </div>
+      <div class="lp-mini-chips">
+        <button class="lp-mini-chip" data-mini-off="-500">-0.5s</button>
+        <button class="lp-mini-chip" data-mini-off="-100">提前 0.1s</button>
+        <button class="lp-mini-chip${!state.offsetMs ? ' on' : ''}" data-mini-off="reset">重置 0.0s</button>
+        <button class="lp-mini-chip" data-mini-off="100">延后 0.1s</button>
+        <button class="lp-mini-chip" data-mini-off="500">+0.5s</button>
+      </div>
+    </div>
+
+    <div class="lp-mini-sec">
+      <div class="lp-mini-head">
+        <span class="lp-mini-title">💬 悬浮歌词设计</span>
+        <div style="display:flex;gap:6px">
+          <button class="lp-mini-chip${state.floatOn ? ' on' : ''}" data-mini-float="toggle">${state.floatOn ? '悬浮窗:已开' : '开启悬浮窗'}</button>
+          <button class="lp-mini-chip${state.floatLocked ? ' on' : ''}" data-mini-float="lock">${state.floatLocked ? '🔓 解锁穿透' : '🔒 锁定穿透'}</button>
+        </div>
+      </div>
+      <div class="lp-mini-row">
+        <span style="font-size:12px;color:var(--dim);min-width:48px">字号</span>
+        <input type="range" id="lpMiniFloatSz" min="14" max="40" step="1" value="${state.floatSize}">
+        <span class="set-val-badge" id="lpMiniFloatSzVal">${state.floatSize}px</span>
+      </div>
+      <div class="lp-mini-row">
+        <span style="font-size:12px;color:var(--dim);min-width:48px">底色度</span>
+        <input type="range" id="lpMiniFloatBg" min="0" max="80" step="5" value="${state.floatBgOpacity}">
+        <span class="set-val-badge" id="lpMiniFloatBgVal">${state.floatBgOpacity}%</span>
+      </div>
+      <div class="lp-mini-row">
+        <span style="font-size:12px;color:var(--dim);min-width:48px">配色</span>
+        <div class="set-swatches">
+          ${floatSwatches.map((c) => `<span class="set-swatch${state.floatColor.toLowerCase() === c ? ' on' : ''}" data-mini-floatcol="${c}" style="width:20px;height:20px;background:${c}"></span>`).join('')}
+        </div>
+      </div>
+    </div>`
+}
+
+function toggleLpMiniPanel(forceState) {
+  state.lpMiniOpen = typeof forceState === 'boolean' ? forceState : !state.lpMiniOpen
+  renderLpMiniPanel()
+}
+
+async function openLyrics() {
+  if (state.cur < 0 && state.tracks.length) {
+    await playTrack(state.tracks[0], 0, { autoPlay: false })
+  }
   if (state.cur < 0) return
   $('#lyricsPage').classList.remove('hidden')
   bindLyricsInteraction()
@@ -2858,6 +3417,8 @@ function openLyrics() {
   syncLyrics(true)
 }
 function closeLyrics() {
+  state.lpMiniOpen = false
+  renderLpMiniPanel()
   $('#lyricsPage').classList.add('hidden')
 }
 
@@ -3080,16 +3641,108 @@ function bindGlobal() {
     if (on) setTimeout(pushFloat, 400)   // 等悬浮窗加载完再推
   })
   $('#lpBack').addEventListener('click', closeLyrics)
-  $('#offDown')?.addEventListener('click', () => nudgeOffset(-100))
-  $('#offUp')?.addEventListener('click', () => nudgeOffset(100))
-  $('#lpOff')?.addEventListener('click', () => {
-    const t = state.tracks[state.cur]
-    if (!t) return
-    state.offsetMs = 0
-    setOffset(t.path, 0)
-    updateOffsetChip()
-    syncLyrics(true)
-    toast('歌词偏移已重置为 0.0s')
+  $('#lpGearBtn')?.addEventListener('click', (e) => { e.stopPropagation(); toggleLpMiniPanel() })
+  $('#lpMiniBtn2')?.addEventListener('click', (e) => { e.stopPropagation(); toggleLpMiniPanel() })
+  $('#lpGainBadge')?.addEventListener('click', (e) => { e.stopPropagation(); toggleLpMiniPanel(true) })
+
+  const miniPanel = $('#lpMiniPanel')
+  if (miniPanel) {
+    miniPanel.addEventListener('click', async (e) => {
+      e.stopPropagation()
+      const t = state.tracks[state.cur]
+      const gBtn = e.target.closest('[data-mini-gain]')
+      if (gBtn && t) {
+        const raw = gBtn.dataset.miniGain
+        const curM = getUserTrackGain(t.path)
+        const nextM = raw === 'reset' ? 0 : Math.max(-12, Math.min(12, curM + (+raw || 0)))
+        setUserTrackGain(t.path, nextM)
+        applyCurrentTrackGain()
+        renderLpMiniPanel()
+        return
+      }
+      if (e.target.closest('[data-mini-normtoggle]')) {
+        state.normEnabled = !state.normEnabled
+        try { localStorage.setItem('desk:normEnabled', state.normEnabled ? '1' : '0') } catch { }
+        applyCurrentTrackGain()
+        renderLpMiniPanel()
+        if (location.hash === '#/settings') render()
+        return
+      }
+      const oBtn = e.target.closest('[data-mini-off]')
+      if (oBtn && t) {
+        const raw = oBtn.dataset.miniOff
+        if (raw === 'reset') {
+          state.offsetMs = 0
+          setOffset(t.path, 0)
+          updateOffsetChip()
+          syncLyrics(true)
+        } else {
+          nudgeOffset(+raw || 0)
+        }
+        return
+      }
+      const fBtn = e.target.closest('[data-mini-float]')
+      if (fBtn) {
+        const act = fBtn.dataset.miniFloat
+        if (act === 'toggle') {
+          const on = await window.api.floatToggle()
+          state.floatOn = on
+          $('#pbFloat')?.classList.toggle('active', on)
+          if (on) setTimeout(() => { pushFloat(); pushFloatStyle() }, 350)
+          renderLpMiniPanel()
+        } else if (act === 'lock') {
+          state.floatLocked = !state.floatLocked
+          window.api.floatLock?.(state.floatLocked)
+          renderLpMiniPanel()
+        }
+        return
+      }
+      const fcBtn = e.target.closest('[data-mini-floatcol]')
+      if (fcBtn) {
+        state.floatColor = fcBtn.dataset.miniFloatcol || '#ffffff'
+        pushFloatStyle()
+        renderLpMiniPanel()
+      }
+    })
+    miniPanel.addEventListener('input', (e) => {
+      const t = state.tracks[state.cur]
+      if (e.target.id === 'lpMiniGainRange' && t) {
+        const v = +e.target.value || 0
+        setUserTrackGain(t.path, v)
+        const { autoDb, manualDb, totalDb } = applyCurrentTrackGain()
+        const vEl = $('#lpMiniGainVal')
+        if (vEl) vEl.textContent = `${manualDb > 0 ? '+' : ''}${manualDb.toFixed(1)}dB`
+        const infoEl = $('#lpMiniGainInfo')
+        if (infoEl) infoEl.textContent = `自动 ${autoDb >= 0 ? '+' : ''}${autoDb.toFixed(1)}dB · 合成 ${totalDb >= 0 ? '+' : ''}${totalDb.toFixed(1)}dB`
+      } else if (e.target.id === 'lpMiniOffRange' && t) {
+        state.offsetMs = Math.round(+e.target.value || 0)
+        setOffset(t.path, state.offsetMs)
+        const vEl = $('#lpMiniOffVal')
+        if (vEl) vEl.textContent = `当前偏移 ${state.offsetMs > 0 ? '+' : ''}${(state.offsetMs / 1000).toFixed(1)}s`
+        syncLyrics(true)
+      } else if (e.target.id === 'lpMiniFloatSz') {
+        state.floatSize = +e.target.value || 22
+        const vEl = $('#lpMiniFloatSzVal')
+        if (vEl) vEl.textContent = state.floatSize + 'px'
+        pushFloatStyle()
+      } else if (e.target.id === 'lpMiniFloatBg') {
+        state.floatBgOpacity = +e.target.value || 0
+        const vEl = $('#lpMiniFloatBgVal')
+        if (vEl) vEl.textContent = state.floatBgOpacity + '%'
+        pushFloatStyle()
+      }
+    })
+  }
+  document.addEventListener('click', (e) => {
+    if (
+      state.lpMiniOpen &&
+      !e.target.closest('#lpMiniPanel') &&
+      !e.target.closest('#lpGearBtn') &&
+      !e.target.closest('#lpMiniBtn2') &&
+      !e.target.closest('#lpGainBadge')
+    ) {
+      toggleLpMiniPanel(false)
+    }
   })
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
@@ -3134,7 +3787,11 @@ function bindGlobal() {
     }
     syncLyrics(false)
   })
-  audio.addEventListener('play', () => { setPlayIcon(true); document.body.classList.add('mp-playing') })
+  audio.addEventListener('play', () => {
+    setPlayIcon(true)
+    document.body.classList.add('mp-playing')
+    applyCurrentTrackGain()
+  })
   audio.addEventListener('pause', () => { setPlayIcon(false); document.body.classList.remove('mp-playing') })
   audio.addEventListener('ended', () => {
     stepQueue(1, true)
@@ -3154,6 +3811,7 @@ function bindGlobal() {
 /* ---------------- 启动 ---------------- */
 ;(async function init() {
   applyTheme()
+  applyLyricsStyle()
   try {
     const mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)')
     if (mq && mq.addEventListener) {

@@ -3,6 +3,7 @@
 :root {
   --ly-color: #ffffff;
   --ly-size: 22px;
+  --ly-bg: transparent;
 }
 
 html, body {
@@ -74,6 +75,9 @@ html, body {
   text-align: center;
   transform: translateZ(0);   /* 独立合成层，减少重绘抖动 */
   backface-visibility: hidden;
+  background: var(--ly-bg, transparent);
+  border-radius: 12px;
+  padding: 4px 12px;
 }
 
 #en {

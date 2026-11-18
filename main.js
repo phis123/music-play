@@ -35,6 +35,7 @@ if (process.env.DSH_SESSION_ID || process.env.ELECTRON_NO_SANDBOX === '1') {
 
 const netapi = require('./netapi')
 const { parseLrc } = require('./lib/lrc')
+const { estimateFileGainDbSync } = require('./lib/loudness')
 const {
   authorizeDir,
   assertInsideLibrary: _assertInsideLib,
@@ -98,7 +99,7 @@ const AUDIO_EXT = new Set(['.mp3', '.flac', '.wav', '.ogg', '.m4a', '.aac', '.op
 const SCAN_CONCURRENCY = 4
 const SCAN_MAX_TRACKS = 5000
 const SCAN_CACHE_FILE = 'scan-cache.json'
-const SCAN_CACHE_VERSION = 1
+const SCAN_CACHE_VERSION = 2
 // 由渲染层“取消”按钮经 'library:scan-cancel' 置位；扫描在每批处理间隙检查。
 let scanCancelRequested = false
 
@@ -167,16 +168,37 @@ authorizeDir(root)
 function cfgPath() {
   return path.join(app.getPath('userData'), 'user-config.json')
 }
+function hasAudioFilesSync(dir) {
+  try {
+    const names = fs.readdirSync(dir)
+    return names.some((n) => AUDIO_EXT.has(path.extname(n).toLowerCase()))
+  } catch {
+    return false
+  }
+}
+
 function loadUserConfig() {
   try {
     const f = cfgPath()
     if (fs.existsSync(f)) {
       const cfg = JSON.parse(fs.readFileSync(f, 'utf8'))
       if (cfg && cfg.root && fs.existsSync(cfg.root)) {
+        // 如果之前误存了空的默认 Music 目录，而应用旁边的 resources 目录有歌，则优先自动切回有歌目录
+        const siblingRes = path.resolve(__dirname, '..')
+        if (cfg.root === DEFAULT_ROOT && !hasAudioFilesSync(cfg.root) && hasAudioFilesSync(siblingRes)) {
+          root = siblingRes
+          authorizeDir(siblingRes)
+          return { ...cfg, root: siblingRes }
+        }
         root = cfg.root
         authorizeDir(cfg.root)
         return cfg
       }
+    }
+    const siblingRes = path.resolve(__dirname, '..')
+    if (!hasAudioFilesSync(root) && hasAudioFilesSync(siblingRes)) {
+      root = siblingRes
+      authorizeDir(siblingRes)
     }
   } catch { }
   return {}
@@ -283,11 +305,12 @@ ipcMain.handle('library:scan', async (_e, dir) => {
     // 缓存命中：(path, size, mtimeMs) 全一致才复用，直接跳过 parseFile。
     if (stat && cache[f] && cache[f].size === stat.size && cache[f].mtimeMs === stat.mtimeMs) {
       const c = cache[f]
-      newCache[f] = { size: stat.size, mtimeMs: stat.mtimeMs, title: c.title, artist: c.artist, album: c.album, duration: c.duration, bitrate: c.bitrate, hasLrc }
-      return { path: f, title: c.title, artist: c.artist, album: c.album, duration: c.duration, bitrate: c.bitrate, hasLrc }
+      const gainDb = typeof c.gainDb === 'number' ? c.gainDb : estimateFileGainDbSync(f)
+      newCache[f] = { size: stat.size, mtimeMs: stat.mtimeMs, title: c.title, artist: c.artist, album: c.album, duration: c.duration, bitrate: c.bitrate, hasLrc, gainDb }
+      return { path: f, title: c.title, artist: c.artist, album: c.album, duration: c.duration, bitrate: c.bitrate, hasLrc, gainDb }
     }
     let title = path.basename(f, path.extname(f))
-    let artist = '', album = '', duration = 0, bitrate = 0
+    let artist = '', album = '', duration = 0, bitrate = 0, tagGain = null
     if (mm) {
       try {
         const meta = await mm.parseFile(f, { duration: true, skipCovers: true })
@@ -296,6 +319,7 @@ ipcMain.handle('library:scan', async (_e, dir) => {
         album = meta.common.album || ''
         duration = meta.format.duration || 0
         bitrate = Math.round((meta.format.bitrate || 0) / 1000)
+        if (meta.common.replaygain_track_gain) tagGain = meta.common.replaygain_track_gain
       } catch { /* 退回文件名 */ }
     }
     // 没有标签时用文件名兜底
@@ -303,8 +327,9 @@ ipcMain.handle('library:scan', async (_e, dir) => {
       const g = parseName(path.basename(f, path.extname(f)))
       if (g.artist) { title = g.title; artist = g.artist }
     }
-    if (stat) newCache[f] = { size: stat.size, mtimeMs: stat.mtimeMs, title, artist, album, duration, bitrate, hasLrc }
-    return { path: f, title, artist, album, duration, bitrate, hasLrc }
+    const gainDb = estimateFileGainDbSync(f, tagGain)
+    if (stat) newCache[f] = { size: stat.size, mtimeMs: stat.mtimeMs, title, artist, album, duration, bitrate, hasLrc, gainDb }
+    return { path: f, title, artist, album, duration, bitrate, hasLrc, gainDb }
   }
   // 有限并发解析；每完成一批（每 10 首或全部完成）推送一次真实进度。
   // 取消只在取下一个任务前检查：在途的最多 SCAN_CONCURRENCY 首会跑完当前解析。
@@ -416,6 +441,16 @@ ipcMain.handle('dialog:pickFolder', async (_e) => {
   if (r.canceled) return null
   authorizeDir(r.filePaths[0])
   return r.filePaths[0]
+})
+
+ipcMain.handle('audio:gain', async (_e, filePath) => {
+  try {
+    verifyIpc(_e)
+    const checked = assertInsideLibrary(filePath)
+    return estimateFileGainDbSync(checked)
+  } catch {
+    return 0
+  }
 })
 
 // ---------- 内置网易云 API ----------
@@ -566,6 +601,7 @@ ipcMain.handle('lib:delete', async (_e, filePath) => {
 
 ipcMain.handle('app:info', (_e) => {
   verifyIpc(_e, { allowFloat: true })
+  loadUserConfig()
   return {
     version: app.getVersion(),
     electron: process.versions.electron,
@@ -712,6 +748,10 @@ ipcMain.handle('float:isOpen', (_e) => {
 ipcMain.on('float:push', (_e, payload) => {
   try { verifyIpc(_e) } catch { return }
   if (floatWin && !floatWin.isDestroyed()) floatWin.webContents.send('float:update', payload)
+})
+ipcMain.on('float:style', (_e, style) => {
+  try { verifyIpc(_e, { allowFloat: true }) } catch { return }
+  if (floatWin && !floatWin.isDestroyed()) floatWin.webContents.send('float:style', style)
 })
 ipcMain.on('float:lock', (_e, locked) => {
   try { verifyIpc(_e, { allowFloat: true }) } catch { return }
