@@ -1,6 +1,6 @@
 {
   "name": "music-play",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "本地音乐播放器，专注双语歌词（原文一行 / 译文一行）",
   "private": true,
   "main": "main.js",

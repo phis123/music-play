@@ -211,6 +211,18 @@ public class Bridge {
         try { return AudioStore.rescan(act); } catch (Exception e) { return 0; }
     }
 
+    /** 上一次扫描时系统媒体库是否可用（false = 缺 READ_MEDIA_AUDIO 权限或索引为空） */
+    @JavascriptInterface
+    public boolean mediaStoreOk() {
+        try { return AudioStore.mediaStoreOk(); } catch (Exception e) { return false; }
+    }
+
+    /** 清空 ID3 标签缓存，下次扫描强制重新读取歌手/专辑/标题 */
+    @JavascriptInterface
+    public void clearTagCache() {
+        try { AudioStore.clearTagCache(act); } catch (Exception e) { }
+    }
+
     @JavascriptInterface public void play(String path) { playEx(path, "", ""); }
     @JavascriptInterface public void pause() { PlaybackService s = svc(); if (s != null) s.pause(); }
     @JavascriptInterface public void resume() { PlaybackService s = svc(); if (s != null) s.resume(); }
@@ -816,7 +828,7 @@ public class Bridge {
     }
 
     @JavascriptInterface
-    public String buildTag() { return "2026-11-18.13:40-v1.0.0"; }
+    public String buildTag() { return "2026-11-18.15:20-v1.0.1"; }
 
     @JavascriptInterface
     public String deviceInfo() {

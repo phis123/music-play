@@ -640,6 +640,7 @@ function refreshLibrary(delays) {
     loadLibrary();
     restorePlayerSession();
     render();
+    checkMediaStoreHint();
     if (S.tracks.length || i >= seq.length - 1) {
       if (!S.tracks.length) { try { if (A && A.rescan) A.rescan(); } catch (e) { } }
       return;
@@ -648,6 +649,34 @@ function refreshLibrary(delays) {
     libTimer = setTimeout(step, seq[i] - seq[i - 1]);
   };
   step();
+}
+
+/** 系统媒体库不可用（缺「音乐和音频」权限）时提示一次，避免整库显示「未知艺人」 */
+let _msHinted = false;
+function checkMediaStoreHint() {
+  if (_msHinted || !S.tracks.length) return;
+  let ok = true;
+  try { ok = A && typeof A.mediaStoreOk === 'function' ? !!A.mediaStoreOk() : true; } catch (e) { ok = true; }
+  if (ok) return;
+  _msHinted = true;
+  const noArtist = S.tracks.filter((t) => !t.artist).length;
+  if (noArtist === 0) return;
+  setTimeout(() => {
+    toast(`系统媒体库不可用，已改用文件内嵌标签读取歌手（${noArtist} 首无歌手）`);
+  }, 1200);
+}
+
+/** 强制重建歌手/专辑标签与封面：清 ID3 缓存 + 清封面内存缓存 + 重新扫描 */
+function rebuildTagsAndCovers() {
+  try { if (A && A.clearTagCache) A.clearTagCache(); } catch (e) { }
+  S.covers.clear();
+  _coverMiss.clear();
+  try { if (A && A.rescan) A.rescan(); } catch (e) { }
+  startTask('enrich', '正在重建歌手与封面', '已清空标签缓存，重新扫描曲库…', 1, false);
+  setTimeout(() => {
+    refreshLibrary([0, 1200, 2600]);
+    setTimeout(() => finishTask('歌手与封面已重建', '已按文件内嵌标签重新读取曲库信息', 4000), 2800);
+  }, 400);
 }
 
 function loadFavs() {
@@ -668,6 +697,8 @@ const favTracks = () => [...S.favs].map(trackByPath).filter(Boolean);
 
 let _jniCoverQueue = [];
 let _jniCoverRaf = 0;
+/** 本次会话内已确认取不到封面的曲目（不再反复排队；「重建歌手/封面」会清空） */
+const _coverMiss = new Set();
 function pumpJniCoverQueue() {
   _jniCoverRaf = 0;
   let budget = 2; // 每帧最多提取 2 张内嵌封面，防止低频 SoC 卡顿
@@ -683,8 +714,13 @@ function pumpJniCoverQueue() {
     }
     let data = '';
     try { data = A && A.cover ? A.cover(key) : ''; } catch (e) { data = ''; }
-    S.covers.set(key, data || '');
-    if (data) item.el.style.backgroundImage = `url("${data}")`;
+    if (data) {
+      S.covers.set(key, data);
+      item.el.style.backgroundImage = `url("${data}")`;
+    } else {
+      // 取不到就先记下来，不写进 S.covers（避免空串把「以后可能成功」永久锁死）
+      _coverMiss.add(key);
+    }
     budget--;
   }
   if (_jniCoverQueue.length) {
@@ -705,6 +741,7 @@ function coverFor(t, el) {
     el.style.backgroundImage = `url("${t.cover}")`;
     return;
   }
+  if (_coverMiss.has(key)) return;
   _jniCoverQueue.push({ t, el });
   if (!_jniCoverRaf) _jniCoverRaf = requestAnimationFrame(pumpJniCoverQueue);
 }
@@ -1421,7 +1458,10 @@ function viewHealth() {
   return backBar('曲库体检') + `
     <div class="sub" style="margin:-6px 2px 12px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
       <span>共扫描 ${S.tracks.length} 首本地音频</span>
-      <button class="hero-btn pri" id="healthFillMeta" style="padding:5px 12px;font-size:12px">一键补齐缺失歌词/封面</button>
+      <span style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="hero-btn" id="healthRebuildTags" style="padding:5px 12px;font-size:12px">重建歌手/封面</button>
+        <button class="hero-btn pri" id="healthFillMeta" style="padding:5px 12px;font-size:12px">一键补齐缺失歌词/封面</button>
+      </span>
     </div>
     <div class="health-grid">
       ${cards.map(([k, lbl, cnt]) => `
@@ -1745,7 +1785,7 @@ async function enrichTracks(manual) {
       return true;
     }
     return true;
-  }).slice(0, manual ? 60 : 12);
+  }).slice(0, manual ? Infinity : 12);
 
   if (!todo.length) {
     if (manual) {
@@ -4109,10 +4149,17 @@ document.addEventListener('click', (e) => {
     render();
     return;
   }
+  if (e.target.closest('#healthRebuildTags')) {
+    e.stopPropagation();
+    toast('正在清空标签缓存并重新读取歌手与封面…');
+    rebuildTagsAndCovers();
+    return;
+  }
   if (e.target.closest('#healthFillMeta')) {
     e.stopPropagation();
     S.tracks.forEach((t) => { if (!t.hasLrc || !t.artist || !t.cover) t._enriched = false; });
-    toast('开始后台自动补齐缺失歌词与封面…');
+    const todoCnt = S.tracks.filter((t) => !t.hasLrc || !t.artist || (!t.cover && !S.covers.get(t.path))).length;
+    toast(`开始自动补齐 ${todoCnt} 首缺失歌词与封面…`);
     enrichMissing();
     return;
   }
