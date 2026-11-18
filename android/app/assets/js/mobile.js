@@ -907,6 +907,12 @@ function voiceRow(v, i) {
   </div>`;
 }
 
+/** 声音候选没有 artist 字段：dj / radio 才是可读的来源名 */
+function voiceArtist(v) {
+  if (!v) return '在线试听';
+  return v.dj || v.radio || '在线试听';
+}
+
 function viewVoices() {
   const v = S.voices;
   const head = v.song
@@ -1586,10 +1592,13 @@ async function previewVoice(i) {
   try {
     const u = await window.neta.songUrl(v.mainTrackId);
     if (!u || !u.url) { toast('试听地址不可用'); return; }
-    A.preview(u.url, (v.title || '试听'), v.cover || '');
-    S.playing = true;
-    paintPlayIcon();
-    toast('试听中：' + (v.title || ''));
+    if (A && typeof A.previewEx === 'function') A.previewEx(u.url, (v.title || '试听'), voiceArtist(v), v.cover || '');
+    else A.preview(u.url, (v.title || '试听'), v.cover || '');
+    let started = true;
+    try { if (typeof A.isPlaying === 'function') started = !!A.isPlaying(); } catch (e2) { }
+    if (started) enterPreviewMode(v.title, voiceArtist(v), v.cover, v.duration);
+    else { S.playing = false; paintPlayIcon(); }
+    toast(started ? ('试听中：' + (v.title || '')) : '试听没能开始，音源可能已失效');
   } catch (e) {
     toast('试听失败：' + (e.message || e));
   }
@@ -2069,9 +2078,13 @@ async function previewCand(it, v) {
       toast('这条音源拿不到试听地址');
       return;
     }
-    A.preview(u.url, v.title || '试听', v.cover || '');
-    S.playing = true;
-    paintPlayIcon();
+    if (A && typeof A.previewEx === 'function') A.previewEx(u.url, v.title || '试听', voiceArtist(v), v.cover || '');
+    else A.preview(u.url, v.title || '试听', v.cover || '');
+    let startedRow = true;
+    try { if (A && typeof A.isPlaying === 'function') startedRow = !!A.isPlaying(); } catch (e2) { }
+    diag('试听 row started=' + startedRow + ' title=' + (v.title || ''));
+    if (startedRow) enterPreviewMode(v.title || '试听', voiceArtist(v), v.cover, v.duration);
+    else { S.playing = false; paintPlayIcon(); toast('试听没能开始，音源可能已失效'); }
     refreshOpenMobileImpPanel(rowIdx);
   } catch (e) {
     imp.prevKey = null;
@@ -3111,9 +3124,12 @@ async function previewSourceCand(idx) {
       toast('该声源暂不可试听');
       return;
     }
-    if (A) A.preview(u.url, v.title || '声源试听', v.cover || '');
-    S.playing = true;
-    paintPlayIcon();
+    if (A && typeof A.previewEx === 'function') A.previewEx(u.url, v.title || '声源试听', voiceArtist(v), v.cover || '');
+    else if (A) A.preview(u.url, v.title || '声源试听', v.cover || '');
+    let started2 = true;
+    try { if (A && typeof A.isPlaying === 'function') started2 = !!A.isPlaying(); } catch (e2) { }
+    if (started2) enterPreviewMode(v.title || '声源试听', voiceArtist(v), v.cover, v.duration);
+    else { S.playing = false; paintPlayIcon(); }
     refreshOpenSheet();
   } catch (e) {
     sw.prevId = '';
@@ -3383,6 +3399,13 @@ function queueNext(delta, autoEnded) {
 }
 
 function paintNpFav() {
+  if (S.previewPath) {
+    const b0 = document.getElementById('npFav');
+    const i0 = document.getElementById('npFavIcon');
+    if (b0) b0.classList.remove('on');
+    if (i0) i0.setAttribute('fill', 'none');
+    return;
+  }
   const curPath = S.queuePaths[S.cur] || '';
   const on = !!(curPath && S.favs.has(curPath));
   const btn = document.getElementById('npFav');
@@ -3392,6 +3415,8 @@ function paintNpFav() {
 }
 
 function showMini(t) {
+  // 非试听占用时自动退出试听展示模式
+  if (S.previewPath && t && t.path !== S.previewPath) S.previewPath = null;
   const m = $('#mini');
   m.classList.remove('hidden');
   $('#miniTitle').textContent = t.title || '未知标题';
@@ -3413,6 +3438,34 @@ function showMini(t) {
   applyCurrentTrackGain();
 }
 
+/** 关键事件落盘：logcat 被刷掉也能事后取证（路径见 Bridge.diag） */
+function diag(msg) {
+  try { if (A && typeof A.diag === 'function') A.diag(String(msg)); } catch (e) { }
+}
+
+/** 试听不建队列，但 mini 条与播放页必须跟着试听走：
+ *  以前只更新播放图标，标题/封面/歌手仍是上一首，看起来像「放的是上首歌」。 */
+function enterPreviewMode(title, artist, coverUrl, durSec) {
+  const path = 'preview:' + Date.now();
+  S.previewPath = path;
+  // 关键：试听也属于「已经播过东西」，必须清掉恢复会话标志，
+  // 否则之后点「恢复」会被 _restoredNeedsPlay 分支劫走，去重播队列里的本地歌。
+  S._restoredNeedsPlay = false;
+  S.covers.set(path, coverUrl || '');
+  showMini({
+    path,
+    title: title || '试听',
+    artist: artist || '在线试听',
+    cover: coverUrl || '',
+    duration: durSec || 0,
+  });
+  S.playing = true;
+  paintPlayIcon();
+  const box = document.getElementById('npLyrics') || document.getElementById('lyricsBox');
+  if (box) box.innerHTML = '<div class="lyric-line">试听片段，暂无歌词</div>';
+}
+function exitPreviewMode() { S.previewPath = null; }
+
 function paintPlayIcon() {
   // discSpinToggle: 唱盘旋转跟随播放状态
   document.querySelector('.np-stage')?.classList.toggle('playing', S.playing);
@@ -3424,8 +3477,8 @@ function paintPlayIcon() {
 }
 
 function togglePlayPause() {
-  if (!S.queuePaths.length) return;
-  if (S._restoredNeedsPlay && !S.playing) {
+  // 试听不建立播放队列，所以「队列为空」不能等价于「不能播放」
+  if (S._restoredNeedsPlay && !S.playing && !S.previewPath && S.queuePaths.length) {
     const t = trackByPath(S.queuePaths[S.cur]);
     if (t && A) {
       const savedSec = S.pos || 0;
@@ -3439,9 +3492,45 @@ function togglePlayPause() {
       return;
     }
   }
-  if (S.playing) { A && A.pause(); S.playing = false; }
-  else { A && A.resume(); S.playing = true; }
+  if (!A) return;
+  if (S.playing) {
+    A.pause();
+    diag('pause 发出');
+    let stillPlaying = false;
+    try { stillPlaying = !!(A.isPlaying && A.isPlaying()); } catch (e) { }
+    S.playing = stillPlaying;
+    paintPlayIcon();
+    if (stillPlaying) toast('暂停失败，请重试');
+    return;
+  }
+  S._restoredNeedsPlay = false;
+  A.resume();
+  S.playing = true;
   paintPlayIcon();
+  diag('resume 发出');
+  checkAfterResume(0);
+}
+
+/** 恢复后按原生状态复核；第一次失败就让原生重开数据源，第二次仍失败才认输 */
+function checkAfterResume(attempt) {
+  setTimeout(() => {
+    let ok = true;
+    try { ok = !!(A && A.isPlaying && A.isPlaying()); } catch (e) { }
+    diag('resume 复核#' + attempt + ' ok=' + ok + ' playing(JS)=' + S.playing);
+    if (ok) return;
+    if (attempt === 0 && A && typeof A.recover === 'function') {
+      diag('resume 复核失败 → 请求原生重开');
+      try { A.recover(); } catch (e) { }
+      checkAfterResume(1);
+      return;
+    }
+    if (S.playing) {
+      S.playing = false;
+      paintPlayIcon();
+      toast('恢复播放失败，请重新点「试听」');
+      diag('resume 最终失败，界面回滚为暂停');
+    }
+  }, 1800);
 }
 
 /* ---------------- 歌词 ---------------- */
@@ -3600,7 +3689,10 @@ window.onPlaying = function (dur) {
   paintPlayIcon();
 };
 window.onEnded = function () { queueNext(1, true); };
-window.onPlayerError = function () { S.playing = false; paintPlayIcon(); toast('播放失败'); };
+window.onPlayerError = function (what, extra) {
+  diag('onPlayerError what=' + what + ' extra=' + extra);
+  S.playing = false; paintPlayIcon(); toast('播放失败');
+};
 
 window.onDownload = function (pct, name, got, total) {
   const label = pct >= 0 ? pct + '%' : (got > 0 ? mbStr(got, total) : '下载中');

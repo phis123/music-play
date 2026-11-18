@@ -25,6 +25,8 @@ import android.os.PowerManager;
 /** 前台播放服务：MediaPlayer + MediaSession + 通知栏 + 音频焦点 + 后台任务保活 */
 public class PlaybackService extends Service {
 
+    private static final String TAG = "MusicPlay";
+
     public static final String CH_ID = "mp_playback";
     public static final int NOTI_ID = 1001;
 
@@ -41,6 +43,11 @@ public class PlaybackService extends Service {
     private Bitmap coverBmp = null;
     private final java.util.HashMap<String, Bitmap> coverCache = new java.util.HashMap<>();
     private boolean playing = false;
+    /** playUrl 正在 prepare/start 期间为 true：此时到来的音频焦点变化是「我们自己请求焦点」引起的抖动，不能当成外部抢占 */
+    private volatile boolean preparing = false;
+    /** 最近一次播放的数据源与暂停位置：数据源失效时 resume() 用它重开 */
+    private String lastUrl = "";
+    private int lastPosMs = 0;
     private int durSec = 0;
     private boolean ducked = false;
     private boolean bgTaskActive = false;
@@ -89,14 +96,19 @@ public class PlaybackService extends Service {
                 .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build());
         mp.setOnCompletionListener(p -> {
             playing = false;
+            lastPosMs = 0;
+            android.util.Log.i(TAG, "onCompletion");
             updateSession();
             notifyState();
             if (listener != null) listener.onComplete();
         });
         mp.setOnErrorListener((p, w, e) -> {
             playing = false;
+            stopTicker();
+            android.util.Log.w(TAG, "MediaPlayer onError what=" + w + " extra=" + e);
             updateSession();
             notifyState();
+            notifyPlayerError(w, e);
             return true;
         });
     }
@@ -116,6 +128,8 @@ public class PlaybackService extends Service {
         session.setActive(true);
         updateSession();
     }
+
+    private boolean lastPushedPlaying = false;
 
     private void updateSession() {
         if (session == null) return;
@@ -288,11 +302,15 @@ public class PlaybackService extends Service {
     }
 
     public void playUrl(String url, String title, String artist, String path, String cover) {
+        android.util.Log.i(TAG, "playUrl thread=" + Thread.currentThread().getName() + " url=" + url);
+        preparing = true;
         try {
             curTitle = title == null ? "" : title;
             curArtist = artist == null ? "" : artist;
             curPath = path == null ? "" : path;
             coverUrl = cover == null ? "" : cover;
+            lastUrl = url == null ? "" : url;
+            lastPosMs = 0;
             coverBmp = null;
             requestFocus();
             if (mp == null) initPlayer();
@@ -307,14 +325,25 @@ public class PlaybackService extends Service {
             updateSession();
             refreshNotification();
             loadCoverAsync();
+            android.util.Log.i(TAG, "playUrl ok, dur=" + durSec);
         } catch (Exception e) {
             playing = false;
+            stopTicker();
+            android.util.Log.w(TAG, "playUrl 失败", e);
+            updateSession();
             notifyState();
+            notifyPlayerError(-1, 0);
+        } finally {
+            preparing = false;
         }
     }
 
     public void pause() {
-        try { if (mp != null && mp.isPlaying()) mp.pause(); } catch (Exception ignored) { }
+        android.util.Log.i(TAG, "pause thread=" + Thread.currentThread().getName() + " pos=" + positionMs());
+        try { if (mp != null && mp.isPlaying()) mp.pause(); } catch (Exception e) {
+            android.util.Log.w(TAG, "pause 失败", e);
+        }
+        lastPosMs = positionMs();
         playing = false;
         stopTicker();
         updateSession();
@@ -323,12 +352,76 @@ public class PlaybackService extends Service {
     }
 
     public void resume() {
+        android.util.Log.i(TAG, "resume thread=" + Thread.currentThread().getName()
+                + " mp=" + (mp == null ? "null" : "ok") + " lastUrl=" + lastUrl);
+        boolean ok = false;
         try {
-            if (mp != null && !mp.isPlaying()) { mp.start(); playing = true; startTicker(); }
-        } catch (Exception ignored) { }
-        updateSession();
-        refreshNotification();
-        notifyState();
+            if (mp != null) {
+                if (!mp.isPlaying()) { mp.start(); }
+                ok = true;
+            }
+        } catch (Exception e) {
+            ok = false;
+            android.util.Log.w(TAG, "resume: mp.start 抛异常，准备重开数据源", e);
+        }
+        if (ok) {
+            playing = true;
+            startTicker();
+            updateSession();
+            refreshNotification();
+            notifyState();
+            android.util.Log.i(TAG, "resume ok");
+            return;
+        }
+        reopenLast("resume失败");
+    }
+
+    /** 按上次的数据源重开并 seek 回暂停位置。
+     *  在主线程调用时（MediaSession 回调）起后台线程做，避免阻塞主线程；
+     *  在 JS 桥线程调用时（原本就在做阻塞 prepare）直接内联执行，保证 MediaPlayer 操作线程一致。 */
+    private void reopenLast(final String why) {
+        if (lastUrl == null || lastUrl.isEmpty()) {
+            playing = false;
+            android.util.Log.w(TAG, why + "：没有可重开的数据源");
+            updateSession();
+            notifyState();
+            notifyPlayerError(-1, 0);
+            return;
+        }
+        final String url = lastUrl;
+        final String title = curTitle, artist = curArtist, path = curPath, cover = coverUrl;
+        final int pos = lastPosMs > 0 ? lastPosMs : positionMs();
+        android.util.Log.i(TAG, why + "：重开 " + url + " @ " + pos + "ms");
+        Runnable task = () -> {
+            playUrl(url, title, artist, path, cover);
+            if (playing && pos > 0) {
+                try { mp.seekTo(pos); } catch (Exception e) {
+                    android.util.Log.w(TAG, "reopen seekTo 失败", e);
+                }
+            }
+            updateSession();
+            notifyState();
+        };
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            new Thread(task, "musicplay-reopen").start();
+        } else {
+            task.run();
+        }
+    }
+
+    /** 供界面在「显示在播但实际没声」时调用：按上次数据源重开并 seek 回原位置 */
+    public void recover() {
+        android.util.Log.i(TAG, "recover() 主动重开数据源");
+        reopenLast("界面请求恢复");
+    }
+
+    private int positionMs() {
+        try { return mp != null ? mp.getCurrentPosition() : 0; } catch (Exception e) { return 0; }
+    }
+
+    /** 把播放失败告诉界面：以前从不回调，用户看到的就是「点了没反应也没有提示」 */
+    private void notifyPlayerError(int what, int extra) {
+        js("window.onPlayerError&&window.onPlayerError(" + what + "," + extra + ")");
     }
 
     public void toggle() { if (playing) pause(); else resume(); }
@@ -363,7 +456,14 @@ public class PlaybackService extends Service {
     }
 
     private void onFocusChange(int change) {
+        android.util.Log.i(TAG, "onFocusChange change=" + change + " preparing=" + preparing + " playing=" + playing);
         if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+            // 正在 prepare/start 时收到的焦点变化，是 requestAudioFocus 自己引起的抖动：
+            // 之前这里会立刻 pause()，把刚开始的播放打断，界面却仍显示「播放中」。
+            if (preparing) {
+                android.util.Log.i(TAG, "忽略准备期间的焦点变化 change=" + change);
+                return;
+            }
             if (playing) { pause(); }
         } else if (change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK) {
             try { if (mp != null) mp.setVolume(0.2f, 0.2f); ducked = true; } catch (Exception ignored) { }

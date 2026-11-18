@@ -75,6 +75,42 @@ public class MainActivity extends Activity {
                 String url = request != null && request.getUrl() != null ? request.getUrl().toString() : null;
                 return !allowUrl(url);
             }
+
+            /** 开发期覆盖：外部目录 files/dev/ 下存在同名文件时优先使用它。
+             *  这样改 JS/CSS 只要 adb push + 重启 App，不必重新安装（vivo 装包必须人工点确认）。
+             *  正式使用时该目录不存在，行为与纯 assets 完全一致。 */
+            @Override
+            public android.webkit.WebResourceResponse shouldInterceptRequest(WebView view, android.webkit.WebResourceRequest req) {
+                String u = req != null && req.getUrl() != null ? req.getUrl().toString() : null;
+                android.webkit.WebResourceResponse r = shouldInterceptRequest(view, u);
+                if (r != null) return r;
+                return super.shouldInterceptRequest(view, req);
+            }
+
+            @Override
+            public android.webkit.WebResourceResponse shouldInterceptRequest(WebView view, String url) {
+                try {
+                    final String prefix = "file:///android_asset/";
+                    if (url == null || !url.startsWith(prefix)) return null;
+                    String rel = url.substring(prefix.length());
+                    int q = rel.indexOf('?');
+                    if (q >= 0) rel = rel.substring(0, q);
+                    java.io.File devDir = new java.io.File(getExternalFilesDir(null), "dev");
+                    java.io.File f = new java.io.File(devDir, rel);
+                    if (!f.isFile()) return null;
+                    String mime = "text/plain";
+                    if (rel.endsWith(".js")) mime = "application/javascript";
+                    else if (rel.endsWith(".css")) mime = "text/css";
+                    else if (rel.endsWith(".html")) mime = "text/html";
+                    else if (rel.endsWith(".json")) mime = "application/json";
+                    else if (rel.endsWith(".svg")) mime = "image/svg+xml";
+                    android.util.Log.i("MusicPlay", "dev 覆盖: " + rel);
+                    return new android.webkit.WebResourceResponse(mime, "UTF-8",
+                            new java.io.FileInputStream(f));
+                } catch (Throwable t) {
+                    return null;
+                }
+            }
         });
         web.setBackgroundColor(0xFFFFFFFF);
 

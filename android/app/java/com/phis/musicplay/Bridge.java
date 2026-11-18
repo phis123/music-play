@@ -181,9 +181,49 @@ public class Bridge {
     }
 
     // ---------------- 播放（走前台 Service） ----------------
+    private static final String TAG = "MusicPlay";
+
     private PlaybackService svc() {
         if (PlaybackService.instance == null) PlaybackService.start(act);
         return PlaybackService.instance;
+    }
+
+    // ---------------- 现场诊断 ----------------
+    /** 把关键事件写进 App 外部目录，logcat 被刷掉也能事后取证：
+     *  /sdcard/Android/data/com.phis.musicplay/files/diag.log（无需任何权限） */
+    @JavascriptInterface public void diag(String msg) {
+        try {
+            java.io.File dir = act.getExternalFilesDir(null);
+            if (dir == null) return;
+            java.io.File f = new java.io.File(dir, "diag.log");
+            if (f.length() > 512 * 1024) {
+                java.io.File old = new java.io.File(dir, "diag.old.log");
+                if (old.exists()) old.delete();
+                f.renameTo(old);
+                f = new java.io.File(dir, "diag.log");
+            }
+            java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("MM-dd HH:mm:ss.SSS", java.util.Locale.US);
+            String line = fmt.format(new java.util.Date()) + "  " + msg + "\n";
+            java.io.FileOutputStream out = new java.io.FileOutputStream(f, true);
+            out.write(line.getBytes("UTF-8"));
+            out.close();
+        } catch (Throwable ignored) { }
+        android.util.Log.i(TAG, "diag: " + msg);
+    }
+
+    /** 界面发现「显示在播但实际没声」时，主动让原生按上次数据源重开一次 */
+    @JavascriptInterface public void recover() {
+        android.util.Log.i(TAG, "JS recover");
+        PlaybackService s = svc();
+        if (s != null) s.recover(); else notifyServiceMissing("recover");
+    }
+
+    /** Service 还没就绪：以前这里静默丢弃命令，界面就是「点了没反应」 */
+    private void notifyServiceMissing(String what) {
+        android.util.Log.w(TAG, "播放服务未就绪，命令被丢弃: " + what);
+        mainHandler.post(() -> {
+            if (web != null) web.evaluateJavascript("window.onPlayerError&&window.onPlayerError(-2,0)", null);
+        });
     }
 
     @JavascriptInterface
@@ -202,7 +242,17 @@ public class Bridge {
 
     @JavascriptInterface
     public void preview(String url, String title, String cover) {
-        PlaybackService.play(act, url, title == null ? "试听" : title, "在线试听", "", cover);
+        previewEx(url, title, "在线试听", cover);
+    }
+
+    /** 带歌手的试听：通知栏与锁屏显示真实歌手，而不是统一的「在线试听」 */
+    @JavascriptInterface
+    public void previewEx(String url, String title, String artist, String cover) {
+        android.util.Log.i(TAG, "JS previewEx title=" + title + " artist=" + artist + " url=" + url);
+        PlaybackService.play(act, url,
+                title == null || title.isEmpty() ? "试听" : title,
+                artist == null || artist.isEmpty() ? "在线试听" : artist,
+                "", cover);
     }
 
     /** 重新扫描曲库目录（媒体库漏扫时兜底） */
@@ -224,9 +274,18 @@ public class Bridge {
     }
 
     @JavascriptInterface public void play(String path) { playEx(path, "", ""); }
-    @JavascriptInterface public void pause() { PlaybackService s = svc(); if (s != null) s.pause(); }
-    @JavascriptInterface public void resume() { PlaybackService s = svc(); if (s != null) s.resume(); }
-    @JavascriptInterface public void toggle() { PlaybackService s = svc(); if (s != null) s.toggle(); }
+    @JavascriptInterface public void pause() {
+        android.util.Log.i(TAG, "JS pause");
+        PlaybackService s = svc(); if (s != null) s.pause(); else notifyServiceMissing("pause");
+    }
+    @JavascriptInterface public void resume() {
+        android.util.Log.i(TAG, "JS resume");
+        PlaybackService s = svc(); if (s != null) s.resume(); else notifyServiceMissing("resume");
+    }
+    @JavascriptInterface public void toggle() {
+        android.util.Log.i(TAG, "JS toggle");
+        PlaybackService s = svc(); if (s != null) s.toggle(); else notifyServiceMissing("toggle");
+    }
     @JavascriptInterface public void stop() { PlaybackService s = svc(); if (s != null) s.pause(); }
     @JavascriptInterface public void seek(int ms) { PlaybackService s = svc(); if (s != null) s.seek(ms); }
     @JavascriptInterface public int position() { PlaybackService s = svc(); return s != null ? s.positionSec() : 0; }
