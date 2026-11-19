@@ -176,7 +176,14 @@ test('Android 同步副本 assets/js/random.js 与 lib/random.js 内容一致（
 test('接线守门：桌面/Android 渲染层都调用 lib/random 的实现，而不是各自内联一份', () => {
   const appJs = fs.readFileSync(path.join(ROOT, 'renderer', 'js', 'app.js'), 'utf8')
   const desktopIndex = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8')
-  const mobileJs = fs.readFileSync(path.join(ROOT, 'android', 'app', 'assets', 'js', 'mobile.js'), 'utf8')
+  // mobile.js 已模块化：接线守门扫描 assets/js 下全部前端模块（保持原断言意图）
+  const mobileJsDir = path.join(ROOT, 'android', 'app', 'assets', 'js')
+  const mobileJs = (function walk(dir) {
+    return fs.readdirSync(dir, { withFileTypes: true }).map((e) => {
+      const p = path.join(dir, e.name)
+      return e.isDirectory() ? walk(p) : (e.name.endsWith('.js') && e.name !== 'random.js' ? fs.readFileSync(p, 'utf8') : '')
+    }).join('\n')
+  })(mobileJsDir)
   const androidIndex = fs.readFileSync(path.join(ROOT, 'android', 'app', 'assets', 'index.html'), 'utf8')
 
   assert.match(appJs, /MusicPlayRandom\.pickNextShuffleIndex/)
