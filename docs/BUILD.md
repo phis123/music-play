@@ -62,6 +62,15 @@ App 内置诊断采集，**用户无需 root、无需连电脑**：
   `adb shell am broadcast -n com.phis.musicplay/.DiagReceiver -a com.phis.musicplay.DIAG_EXPORT`
   （必须带 `-n`：Android 8+ 不接受隐式广播到 manifest receiver）。
 
+## 桌面端 Electron 版本与打包（v1.0.9 起为 45.2.1）
+
+- 31.7.7 已于 2025-01-14 EOL，v1.0.9 起升到 **45.2.1**（Chromium 156 / Node 24.22）。
+- **打包方式必须整目录复制 dist**：45 的 dist **不再包含 `libEGL.dll` / `libGLESv2.dll`**（ANGLE 静态链接进二进制），也没有 Windows ia32 预编译。按文件名清单复制会缺文件导致启动失败。
+- 便携包结构：`music-play.exe`（启动器 stub）+ `music-play-core.exe`（= dist/electron.exe 改名）+ `resources/app/`（应用代码，含 `node_modules`）+ dist 其余文件整目录。
+- 45 与 31 的差异：新增 `dxcompiler.dll`、`electron_wer.dll`、`version`；`LICENSE.electron.txt` 改名为 `LICENSE`；dist 内 `resources/default_app.asar` 存在但**不要**覆盖 `resources/app`。
+- 前置约束：Electron 45 的渲染层 preload 不再提供 `Buffer`/`timers`/`url` shim，**preload 里禁止使用这些**（当前 `preload.js` 只用 `require('electron')`，符合）。
+- 发布前必测：主窗启动、播放出声、悬浮歌词 + 鼠标穿透（Win32 侧可校验 `WS_EX_TRANSPARENT`）、托盘菜单、SMTC/媒体键、WebAudio 音量平衡、IPC 全通道。
+
 ## 发布
 
 1. `git tag -a vX.Y.Z -m "..."` 并推送（`test` / `build` 两个工作流会跑单测与源码归档）；
