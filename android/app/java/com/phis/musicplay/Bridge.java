@@ -922,7 +922,7 @@ public class Bridge {
     }
 
     @JavascriptInterface
-    public String buildTag() { return "2026-11-18.15:20-v1.0.1"; }
+    public String buildTag() { return PlaybackService.buildTagText; }
 
     @JavascriptInterface
     public String deviceInfo() {
