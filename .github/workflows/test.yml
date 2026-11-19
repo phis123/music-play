@@ -33,5 +33,14 @@ jobs:
       - name: Install dependencies (no lockfile yet → npm install)
         run: npm install --no-audit --no-fund
 
+      # 语法守门：目标文件列表与 npm script 都在仓库里（tools/lint-syntax.mjs），
+      # CI 只调用 npm script，本地与 CI 用同一套规则，避免 yaml 里再抄一份命令。
+      # node --check 一次只收一个文件、且 Windows cmd 不展开通配符，所以脚本内部
+      # 自己展开 lib/*.js、renderer/js/*.js 等（用 process.execPath，与 setup-node 同版本）。
+      - name: Syntax gate (node --check)
+        run: npm run lint:syntax
+
+      # 单测：node --test 会自动发现 test/*.test.js；每个测试文件独立子进程，
+      # 因此 ensure-server 这类会打桩 net / 改 TEMP 的用例不会污染其他文件。
       - name: Run unit tests (Node built-in test runner)
         run: npm test
