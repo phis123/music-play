@@ -73,7 +73,8 @@ public class Bridge {
             File pubMusic = android.os.Environment.getExternalStoragePublicDirectory(
                     android.os.Environment.DIRECTORY_MUSIC);
             File[] roots = new File[]{
-                    new File(pubMusic, "music-play"), // AudioStore.rootDir()，不直接调以免触发 mkdirs
+                    AudioStore.rootDir(),   // 含用户在设置里改过的自定义曲库根
+                    new File(pubMusic, "music-play"),
                     pubMusic,
                     act.getExternalFilesDir(null),
             };
@@ -661,6 +662,17 @@ public class Bridge {
                 o.put("reason", "路径不在曲库目录内");
                 return o.toString();
             }
+            // 只允许删除音频文件与它自己的旁挂派生物（.lrc/.jpg），
+            // 避免「在曲库目录内」就等于可以删任意文件（例如同目录下别人的图片/文档）
+            String lower = path.toLowerCase();
+            boolean isAudio = lower.endsWith(".mp3") || lower.endsWith(".flac") || lower.endsWith(".m4a")
+                    || lower.endsWith(".wav") || lower.endsWith(".ogg") || lower.endsWith(".aac")
+                    || lower.endsWith(".opus") || lower.endsWith(".wma") || lower.endsWith(".ape");
+            if (!isAudio) {
+                o.put("ok", false);
+                o.put("reason", "只允许删除曲库中的音频文件");
+                return o.toString();
+            }
             boolean existed = f.exists();
             boolean ok = existed ? f.delete() : true;
             if (ok) {
@@ -671,7 +683,9 @@ public class Bridge {
                     act.getContentResolver().delete(
                         android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                         android.provider.MediaStore.MediaColumns.DATA + "=?", new String[]{path});
-                } catch (Throwable ignored) { }
+                } catch (Throwable t) {
+                    Diag.write("bridge", "MediaStore 删除失败（文件已删，索引可能残留）: " + t);
+                }
                 android.media.MediaScannerConnection.scanFile(act, new String[]{path}, null, null);
             }
             o.put("ok", ok);

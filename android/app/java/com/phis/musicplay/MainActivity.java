@@ -137,9 +137,14 @@ public class MainActivity extends Activity {
         String perm = Build.VERSION.SDK_INT >= 33
                 ? Manifest.permission.READ_MEDIA_AUDIO
                 : Manifest.permission.READ_EXTERNAL_STORAGE;
-        if (checkSelfPermission(perm) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{perm}, 1);
+        java.util.ArrayList<String> need = new java.util.ArrayList<>();
+        if (checkSelfPermission(perm) != PackageManager.PERMISSION_GRANTED) need.add(perm);
+        // Android 13+ 前台播放服务的通知需要运行时权限，否则通知栏/锁屏控制不显示
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            need.add(Manifest.permission.POST_NOTIFICATIONS);
         }
+        if (!need.isEmpty()) requestPermissions(need.toArray(new String[0]), 1);
     }
 
     @Override
