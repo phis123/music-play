@@ -1,6 +1,6 @@
 # music-play
 
-**v1.0.6 · 正式版**
+**v1.0.7 · 正式版**
 
 一个专注**双语歌词**的本地音乐播放器——原文一行、译文一行，跟着播放平滑滚动。支持 Windows 桌面端（Electron）与 Android 移动端。
 
@@ -30,7 +30,7 @@ I can't be helped because I love to play the victim
 <堕落天使手持剪刀狂奔，剪断我的三根手指>
 ```
 
-## 功能特性（v1.0.6）
+## 功能特性（v1.0.7）
 
 - **本地曲库管理**：递归扫描音频目录，支持 `mp3 / flac / wav / m4a / ogg / aac / opus`，自动记忆自定义音乐目录；增量扫描缓存（`scan-cache.json`）+ 封面 LRU，648 首曲库秒开
 - **播放控制与队列**：顺序循环 / 单曲循环 / 随机播放，内置可视化播放队列抽屉（当前曲目动态声波指示、插队「下一首播放」、移除与清空）
@@ -61,6 +61,23 @@ I can't be helped because I love to play the victim
 
 ## 更新记录
 
+### v1.0.7
+
+**新增「诊断与日志导出」，用于定位偶发问题与机型适配问题，无需 root、无需连电脑：**
+
+- 设置页 →「🧾 诊断与日志导出」→「📦 导出诊断包」，在 `Android/data/<pkg>/files/diag/` 生成 zip
+- 包内含：`session.log`（运行日志）、`crash-*.txt`（崩溃堆栈）、`snapshot.txt`（机型/屏幕/WebView/权限/存储/电量/播放状态）、`library.json`（曲库摘要，不含音频）、`logcat.txt`（本进程日志尾部）、`state.json`（设置与队列摘要）
+- 全局捕获 `window.onerror` / `unhandledrejection` / 原生回调异常；原生侧装 `UncaughtExceptionHandler`，崩溃也能留现场
+- 维护者可用广播**不动界面**触发：`adb shell am broadcast -n com.phis.musicplay/.DiagReceiver -a com.phis.musicplay.DIAG_EXPORT`（必须带 `-n`）
+
+**安全与工程修复（代码审查发现）：**
+
+- `library:scan` 不再接受渲染层传来的未授权目录（新目录只能经「选择目录」授权），堵住"扫描任意目录即授权"的信任缺口
+- `lib:fav` 收藏/取消收藏补 `assertSafeWriteTarget` 与库内 realpath 复核，防止经 junction/软链写到库外
+- 打包脚本：签名口令改为**必须由环境变量提供**（不再有默认值），`APK_WORK_DIR` 改 `mkdtemp` 并拒绝危险路径，版本号改为「package.json + AndroidManifest」单一来源（避免降级安装）
+- 渲染层封面缓存改 LRU（240 张）；悬浮窗开关/锁定状态改为主进程与主窗双向同步（托盘开窗后 UI 不再显示"未开"）
+- Android 试听播完/失败会正确退出试听态，不再把用户切到队列里的本地歌或卡在"播放中"
+
 ### v1.0.6
 
 修复「在线试听暂停后点播放不恢复」与「试听时仍显示上一首的封面歌手」。三个根因都在真机上用日志证实：
@@ -86,8 +103,8 @@ I can't be helped because I love to play the victim
 | 平台 | 文件 | 说明 |
 |---|---|---|
 | Windows | `music-play-Setup-1.0.1.exe` | 单文件安装程序（默认安装到 `E:\music-play`，可自选）；v1.0.6 未改动桌面端，沿用 v1.0.1 |
-| Android | `music-play-1.0.6.apk` | 支持 Android 7.0+（minSdk 24 / targetSdk 34），可直接侧载安装 |
-| 源码 | `music-play-src-1.0.6.zip` | 桌面端 + Android 端完整源码 |
+| Android | `music-play-1.0.7.apk` | 支持 Android 7.0+（minSdk 24 / targetSdk 34），可直接侧载安装 |
+| 源码 | `music-play-src-1.0.7.zip` | 桌面端 + Android 端完整源码 |
 
 Android 首次使用请允许「所有文件访问权限」（用于删除 / 写入 `Music/` 目录）与「显示在其他应用上层」（悬浮歌词）；Android 13+ 还需允许通知权限以显示播放控制。
 

@@ -77,6 +77,44 @@ public class AudioStore {
 
     public static boolean mediaStoreOk() { return lastMediaStoreOk; }
 
+    private static volatile int lastTrackCount = -1;
+    public static int lastCount() { return lastTrackCount; }
+
+    /** 曲库摘要（仅元信息，不含音频内容），供诊断导出包使用 */
+    public static String diagJson(Context ctx) {
+        try {
+            String raw = listJson(ctx);
+            JSONArray arr = new JSONArray(raw);
+            JSONArray out = new JSONArray();
+            int noArtist = 0, noLrc = 0, noDur = 0;
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                JSONObject r = new JSONObject();
+                String path = o.optString("path", "");
+                r.put("name", path.substring(path.lastIndexOf('/') + 1));
+                r.put("size", o.optLong("size", 0));
+                r.put("dur", o.optDouble("duration", 0));
+                r.put("hasArtist", !o.optString("artist", "").isEmpty());
+                r.put("hasLrc", o.optBoolean("hasLrc", false));
+                out.put(r);
+                if (o.optString("artist", "").isEmpty()) noArtist++;
+                if (!o.optBoolean("hasLrc", false)) noLrc++;
+                if (o.optDouble("duration", 0) <= 0) noDur++;
+            }
+            JSONObject head = new JSONObject();
+            head.put("根目录", rootDir().getAbsolutePath());
+            head.put("曲目数", arr.length());
+            head.put("媒体库可用", lastMediaStoreOk);
+            head.put("缺歌手", noArtist);
+            head.put("缺歌词", noLrc);
+            head.put("缺时长", noDur);
+            return new JSONObject().put("summary", head).put("tracks", out).toString(2);
+        } catch (Throwable t) {
+            return "{\"error\":\"" + t + "\"}";
+        }
+    }
+
     private static boolean isAudio(String name) {
         if (name == null) return false;
         String low = name.toLowerCase();
@@ -254,6 +292,7 @@ public class AudioStore {
 
         saveTagCache(ctx);
 
+        lastTrackCount = map.size();
         for (JSONObject o : map.values()) arr.put(o);
         return arr.toString();
     }

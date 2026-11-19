@@ -37,4 +37,6 @@ contextBridge.exposeInMainWorld('api', {
   onFloatUpdate: (cb) => ipcRenderer.on('float:update', (_e, p) => cb(p)),
   onFloatStyle: (cb) => ipcRenderer.on('float:style', (_e, s) => cb(s)),
   onFloatLocked: (cb) => ipcRenderer.on('float:locked', (_e, v) => cb(v)),
+  onFloatOpened: (cb) => ipcRenderer.on('float:opened', () => cb()),
+  onFloatClosed: (cb) => ipcRenderer.on('float:closed', () => cb()),
 })

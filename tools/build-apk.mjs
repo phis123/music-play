@@ -4,25 +4,70 @@
 // 因此这里改为：aapt2 link 不带 -A，随后重新打包 zip 时统一用正斜杠写入 assets。
 // 用法: node build-apk.mjs <repoRoot> <outApk> <versionName> <versionCode>
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 
 const repoRoot = path.resolve(process.argv[2] || '.')
 const outApk = path.resolve(process.argv[3] || 'music-play.apk')
-const versionName = process.argv[4] || '1.0.0'
-const versionCode = process.argv[5] || '100'
+
+// 版本号默认来源：
+//   versionName ← package.json（唯一产品版本号）
+//   versionCode ← AndroidManifest.xml（历史已安装的递增号，必须单调，不能靠公式瞎推）
+// 二者不一致时只警告不阻断，避免再次出现「示例 100 < 已装 106」的降级安装失败。
+function readPkgVersion() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).version || '0.0.0'
+  } catch { return '0.0.0' }
+}
+function readManifest() {
+  try { return fs.readFileSync(path.join(repoRoot, 'android/app/AndroidManifest.xml'), 'utf8') } catch { return '' }
+}
+function manifestCode() {
+  const m = readManifest().match(/android:versionCode="(\d+)"/)
+  return m ? m[1] : ''
+}
+function manifestName() {
+  const m = readManifest().match(/android:versionName="([^"]+)"/)
+  return m ? m[1] : ''
+}
+const pkgVersion = readPkgVersion()
+const versionName = process.argv[4] || pkgVersion
+const versionCode = process.argv[5] || manifestCode() || '1'
+if (!process.argv[5] && manifestName() && manifestName() !== pkgVersion) {
+  console.warn('⚠ 版本不一致：package.json=' + pkgVersion + '，AndroidManifest=' + manifestName() + '（以 package.json 为准写入 APK）')
+}
+if (!process.argv[5]) console.log('版本: ' + versionName + ' / code ' + versionCode + '（来自 package.json + AndroidManifest）')
 
 const SDK = process.env.ANDROID_SDK_ROOT || 'E:/android-toolchain/android-sdk'
 const BT = path.join(SDK, 'build-tools/34.0.0')
 const ANDROID_JAR = path.join(SDK, 'platforms/android-34/android.jar')
 const JAVA_HOME = process.env.JAVA_HOME || 'E:/android-toolchain/jdk/jdk-17.0.20.1+1'
 const PYTHON = process.env.PYTHON || 'python'
-const KEYSTORE = process.env.APK_KEYSTORE || 'E:/dsh/work3/keys/music-play-release.jks'
-const KS_PASS = process.env.APK_KS_PASS || 'musicplay2026'
-const KS_ALIAS = process.env.APK_KS_ALIAS || 'musicplay'
+const KEYSTORE = process.env.APK_KEYSTORE || ''
+const KS_PASS = process.env.APK_KS_PASS || ''
+const KS_ALIAS = process.env.APK_KS_ALIAS || ''
+if (!KEYSTORE || !KS_PASS || !KS_ALIAS) {
+  console.error('缺少签名配置：请设置 APK_KEYSTORE / APK_KS_PASS / APK_KS_ALIAS 环境变量')
+  console.error('（口令不再提供默认值，避免提交到仓库；用法见 docs/BUILD.md）')
+  process.exit(2)
+}
 
 const appDir = path.join(repoRoot, 'android/app')
-const work = path.resolve(process.env.APK_WORK_DIR || '.apk-work')
+// 工作目录：默认用系统临时目录下的唯一目录；显式指定时拒绝危险目标再删除
+const work = (() => {
+  const custom = process.env.APK_WORK_DIR
+  if (!custom) return fs.mkdtempSync(path.join(os.tmpdir(), 'mp-apk-'))
+  const abs = path.resolve(custom)
+  const safe = abs.length > 3 && abs !== path.parse(abs).root &&
+    !repoRoot.startsWith(abs + path.sep) && abs !== repoRoot &&
+    path.basename(abs).length > 0
+  if (!safe) {
+    console.error('APK_WORK_DIR 指向危险路径（仓库/盘符根），已拒绝：' + abs)
+    process.exit(2)
+  }
+  return abs
+})()
 const exe = (n) => path.join(BT, n)
 const sh = (cmd, args, opts = {}) => {
   process.stdout.write(`  > ${path.basename(cmd)} ${args.slice(0, 4).join(' ')}\n`)
@@ -36,6 +81,7 @@ const sh = (cmd, args, opts = {}) => {
 
 fs.rmSync(work, { recursive: true, force: true })
 fs.mkdirSync(work, { recursive: true })
+console.log('工作目录: ' + work)
 const gen = path.join(work, 'gen')
 const classes = path.join(work, 'classes')
 const dexout = path.join(work, 'dex')
@@ -144,8 +190,8 @@ sh(exe('zipalign.exe'), ['-f', '-p', '4', packaged, aligned])
 fs.mkdirSync(path.dirname(outApk), { recursive: true })
 if (fs.existsSync(outApk)) fs.unlinkSync(outApk)
 sh(exe('apksigner.bat'), [
-  'sign', '--ks', KEYSTORE, '--ks-pass', `pass:${KS_PASS}`, '--ks-key-alias', KS_ALIAS,
-  '--key-pass', `pass:${KS_PASS}`, '--v1-signing-enabled', 'true', '--v2-signing-enabled', 'true',
+  'sign', '--ks', KEYSTORE, '--ks-pass', 'env:APK_KS_PASS', '--ks-key-alias', KS_ALIAS,
+  '--key-pass', 'env:APK_KS_PASS', '--v1-signing-enabled', 'true', '--v2-signing-enabled', 'true',
   '--out', outApk, aligned,
 ])
 
@@ -154,3 +200,4 @@ console.log('== 7/7 校验 ==')
 sh(exe('apksigner.bat'), ['verify', '--print-certs', outApk], { stdio: 'inherit' })
 sh(PYTHON, [checkPy, outApk], { stdio: 'inherit' })
 console.log(`OK: ${outApk} (${(fs.statSync(outApk).size / 1024).toFixed(1)} KB, versionName=${versionName}, versionCode=${versionCode})`)
+try { fs.rmSync(work, { recursive: true, force: true }) } catch { /* 清理失败不影响产物 */ }

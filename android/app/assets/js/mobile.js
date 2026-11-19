@@ -59,6 +59,8 @@ const S = {
   floatColor: (function () { try { return localStorage.getItem('mob:floatColor') || '#ffffff'; } catch (e) { return '#ffffff'; } })(),
   floatSizeSp: (function () { try { return Math.min(28, Math.max(12, +(localStorage.getItem('mob:floatSizeSp') || 18))); } catch (e) { return 18; } })(),
   floatBgOpacity: (function () { try { return Math.min(80, Math.max(0, +(localStorage.getItem('mob:floatBgOpacity') || 0))); } catch (e) { return 0; } })(),
+  diagLastPath: '',
+  diagSnapshotText: '',
 };
 
 function getTrackGainMap() {
@@ -166,6 +168,76 @@ function pushOverlayStyle(immediate) {
     clearTimeout(_overlayStyleTimer);
     _overlayStyleTimer = setTimeout(applyNow, 45);
   }
+}
+
+/* ---------------- 诊断日志（偶发问题/机型适配定位） ---------------- */
+/** 写一条诊断日志：落盘到 Android/data/<pkg>/files/diag/session.log，并打 logcat */
+function diagLog(tag, msg) {
+  try { if (A && typeof A.diagLog === 'function') A.diagLog(String(tag || 'js'), String(msg == null ? '' : msg)); } catch (e) { }
+}
+
+/** 收集前端关键状态，写进导出包的 state.json（不含任何音频内容） */
+function diagCollectState() {
+  const ls = {};
+  try {
+    const keep = ['mob:normEnabled', 'mob:normPreset', 'mob:randomStrategy', 'mob:lrcSize', 'mob:lrcColor',
+      'mob:floatColor', 'mob:floatSizeSp', 'mob:floatBgOpacity', 'theme', 'playMode', 'player:pos'];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (keep.indexOf(k) >= 0 || k.indexOf('player:') === 0 || k.indexOf('off:') === 0)) {
+        const v = localStorage.getItem(k);
+        ls[k] = (v && v.length > 300) ? (v.slice(0, 300) + '…(' + v.length + ')') : v;
+      }
+    }
+    let keys = 0, bytes = 0;
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i) || '';
+      keys++;
+      bytes += k.length + (localStorage.getItem(k) || '').length;
+    }
+    ls.__meta = { keyCount: keys, approxBytes: bytes, metaKeys: Object.keys(localStorage).filter(x => x.indexOf('meta:') === 0).length };
+  } catch (e) { }
+  let errs = [];
+  try { errs = (S.task && S.task.errors || []).slice(-10).map(x => (x.name || '') + ' → ' + (x.reason || '')); } catch (e) { }
+  return JSON.stringify({
+    build: (function () { try { return A && A.buildTag ? A.buildTag() : 'web-preview'; } catch (e) { return '?'; } })(),
+    theme: S.theme, normEnabled: S.normEnabled, normPreset: S.normPreset,
+    randomStrategy: S.randomStrategy, lrcSize: S.lrcSize, lrcColor: S.lrcColor,
+    curPath: S.queuePaths[S.cur] || '', queueLen: S.queuePaths.length, cur: S.cur,
+    playing: S.playing, previewing: !!S.previewPath, pos: Math.round(S.pos || 0), dur: Math.round(S.dur || 0),
+    tracks: S.tracks.length, coversCached: S.covers ? S.covers.size : -1,
+    deviceInfo: (function () { try { return JSON.parse((A && A.deviceInfo && A.deviceInfo()) || '{}'); } catch (e) { return {}; } })(),
+    localStorage: ls, taskErrors: errs,
+  }, null, 2);
+}
+
+let _diagHooked = false;
+function hookDiag() {
+  if (_diagHooked) return;
+  _diagHooked = true;
+  window.addEventListener('error', (ev) => {
+    try {
+      const t = ev && ev.target;
+      const where = t && t !== window ? (t.src || t.tagName || '') : (ev.filename || '');
+      diagLog('js-error', (ev.message || '') + ' @ ' + where + ':' + (ev.lineno || 0) + ':' + (ev.colno || 0)
+        + (ev.error && ev.error.stack ? '\n' + String(ev.error.stack).slice(0, 1500) : ''));
+    } catch (e) { }
+  }, true);
+  window.addEventListener('unhandledrejection', (ev) => {
+    try {
+      const r = ev && ev.reason;
+      diagLog('js-reject', (r && (r.stack || r.message) ? String(r.stack || r.message) : String(r)).slice(0, 1500));
+    } catch (e) { }
+  });
+  ['onPlayerError', 'onEnded', 'onAppResume'].forEach((fn) => {
+    const orig = window[fn];
+    if (typeof orig !== 'function') return;
+    window[fn] = function () {
+      try { diagLog('native-cb', fn + ' args=' + Array.prototype.slice.call(arguments).join(',')); } catch (e) { }
+      try { return orig.apply(this, arguments); } catch (e) { diagLog('native-cb-err', fn + ' → ' + e); throw e; }
+    };
+  });
+  diagLog('app', 'hookDiag 已安装');
 }
 
 /* ---------------- 页面切换主线程让出 + 原生后台防冻结定时器 + 全局任务进度中心 (b73) ---------------- */
@@ -641,6 +713,7 @@ function refreshLibrary(delays) {
     restorePlayerSession();
     render();
     checkMediaStoreHint();
+    diagLog('library', 'tracks=' + S.tracks.length + ' root=' + (function () { try { return (A && A.rootDir) ? A.rootDir() : ''; } catch (e) { return ''; } })());
     if (S.tracks.length || i >= seq.length - 1) {
       if (!S.tracks.length) { try { if (A && A.rescan) A.rescan(); } catch (e) { } }
       return;
@@ -1400,6 +1473,24 @@ function viewSettings() {
           <button class="hero-btn pri" data-go="health">🩺 打开曲库体检</button>
           <button class="hero-btn" data-enrich-now="1">✦ 补齐封面与歌词</button>
           <button class="hero-btn" data-set-clearstats="1">🧹 清空统计缓存</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="set-card">
+      <div>
+        <div class="set-card-title">🧾 诊断与日志导出</div>
+        <div class="set-card-desc">遇到闪退、偶发无响应、机型适配异常时用这里：一键打包现场（日志 + 崩溃堆栈 + 设备/屏幕/WebView/权限快照 + 曲库摘要），无需连电脑、无需 root</div>
+      </div>
+      <div class="set-row">
+        <div class="set-row-main">
+          <div class="set-row-label">导出诊断包</div>
+          <div class="set-row-sub" id="diagPathTip">${esc(S.diagLastPath ? ('上次导出：' + S.diagLastPath) : '导出后会在 App 外部目录生成 zip，路径会显示在这里')}</div>
+        </div>
+        <div class="set-row-ctrl">
+          <button class="hero-btn pri" data-diag="export">📦 导出诊断包</button>
+          <button class="hero-btn" data-diag="snapshot">👁 查看快照</button>
+          <button class="hero-btn" data-diag="clear">🧹 清空本地日志</button>
         </div>
       </div>
     </div>
@@ -2704,6 +2795,20 @@ function sheetHtml() {
       </div>
     </div>`;
   }
+  if (sh.kind === 'diagsnap') {
+    return `<div class="sheet">
+      <div class="sheet-head-row">
+        <div>
+          <div class="sheet-title">环境快照</div>
+          <div class="sheet-dim" style="margin-top:2px">设备 / 屏幕 / WebView / 权限 / 存储 / 播放状态</div>
+        </div>
+      </div>
+      <pre class="diag-pre">${esc(S.diagSnapshotText || '')}</pre>
+      <div class="sheet-acts">
+        <button class="sheet-btn ghost" data-sheet-close="1">关闭</button>
+      </div>
+    </div>`;
+  }
   if (sh.kind === 'npset') {
     const curPath = S.queuePaths[S.cur] || '';
     const t = curPath ? trackByPath(curPath) : null;
@@ -3688,10 +3793,29 @@ window.onPlaying = function (dur) {
   }
   paintPlayIcon();
 };
-window.onEnded = function () { queueNext(1, true); };
+window.onEnded = function () {
+  // 试听不建队列：播完直接收尾，别把用户切到队列里的本地歌，也别卡在「播放中」
+  if (S.previewPath) {
+    exitPreviewMode();
+    S.playing = false;
+    paintPlayIcon();
+    diagLog('preview', '试听播完，已退出试听态');
+    return;
+  }
+  queueNext(1, true);
+};
 window.onPlayerError = function (what, extra) {
   diag('onPlayerError what=' + what + ' extra=' + extra);
-  S.playing = false; paintPlayIcon(); toast('播放失败');
+  if (S.previewPath) {
+    exitPreviewMode();
+    S.playing = false;
+    paintPlayIcon();
+    toast('试听失败（' + (what === -2 ? '播放服务未就绪' : what) + '），请重新点试听');
+    return;
+  }
+  S.playing = false;
+  paintPlayIcon();
+  toast('播放失败');
 };
 
 window.onDownload = function (pct, name, got, total) {
@@ -4344,6 +4468,42 @@ document.addEventListener('click', (e) => {
     toast('已清空全部单曲音量微调记录');
     return;
   }
+  const diagBtn = e.target.closest('[data-diag]');
+  if (diagBtn) {
+    e.stopPropagation();
+    const kind = diagBtn.dataset.diag;
+    if (kind === 'export') {
+      try {
+        diagLog('ui', '用户点击导出诊断包');
+        if (A && typeof A.diagState === 'function') A.diagState(diagCollectState());
+        const p = (A && typeof A.diagExport === 'function') ? A.diagExport() : '';
+        if (p) {
+          S.diagLastPath = p;
+          render();
+          toast('诊断包已生成：' + p);
+        } else {
+          toast('导出失败，请确认存储可用');
+        }
+      } catch (err) {
+        toast('导出异常：' + (err.message || err));
+      }
+      return;
+    }
+    if (kind === 'snapshot') {
+      let txt = '';
+      try { txt = (A && typeof A.diagSnapshot === 'function') ? A.diagSnapshot() : ''; } catch (err) { txt = '读取失败：' + err; }
+      S.diagSnapshotText = txt || '（快照为空）';
+      openSheet('diagsnap', null);
+      return;
+    }
+    if (kind === 'clear') {
+      try { if (A && typeof A.diagClear === 'function') A.diagClear(); } catch (err) { }
+      S.diagLastPath = '';
+      render();
+      toast('已清空本地诊断日志（已导出的 zip 保留）');
+      return;
+    }
+  }
   if (e.target.closest('[data-set-clearstats]')) {
     e.stopPropagation();
     clearSearchHist();
@@ -4720,6 +4880,8 @@ function syncWide() {
 }
 
 function boot() {
+  hookDiag();
+  diagLog('app', 'boot start, build=' + (function () { try { return (A && A.buildTag) ? A.buildTag() : 'web-preview'; } catch (e) { return '?'; } })());
   applyTheme();
   applyLyricsStyle();
   pushOverlayStyle();
