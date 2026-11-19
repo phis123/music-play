@@ -1,6 +1,32 @@
 'use strict'
 // ensureServer（基线 netapi.js:36-70）与 bootPromise 失败重置（第 6 项）。
 // 通过的测试只覆盖不启动服务就能验证的部分；失败重置的测试目前 skip，见下。
+//
+// 【CI 加固】本文件原先依赖「没有安装 @neteasecloudmusicapienhanced/api，
+// 于是 require(server.js) 必然失败」来制造确定性启动失败。CI 加了
+// `npm install` 之后依赖会装上，启动可能真的成功（且会尝试联网），
+// 断言 `assert.rejects` 就会偶发/必然变红 —— 这是典型的「靠环境凑绿」。
+// 现改为：在 require('../netapi') 之前把 node:net 的 createServer 打桩，
+// 让 findFreePort 在端口探测阶段确定性失败（不触碰真实端口，不与网络交互）。
+// 这样无论依赖装没装，启动都必然失败，测试断言不放松。
+const net = require('node:net')
+const { EventEmitter } = require('node:events')
+
+// 只在「监听」时立刻报错（模拟端口永远不可用），其余方法保持空实现。
+net.createServer = function fakeCreateServer() {
+  const srv = new EventEmitter()
+  srv.listen = function () {
+    process.nextTick(() => {
+      const err = new Error('test 桩：模拟端口不可用（EADDRINUSE）')
+      err.code = 'EADDRINUSE'
+      srv.emit('error', err)
+    })
+  }
+  srv.close = function (cb) { if (typeof cb === 'function') cb() }
+  srv.address = function () { return { port: 0 } }
+  return srv
+}
+
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
 const netapi = require('../netapi')
@@ -19,10 +45,9 @@ test('启动前 getPort() 为 0（服务惰性启动，未被调用）', () => {
 // 改为数诊断日志里的 BOOT FAILED：重新启动会再走一遍 catch、再记一条；
 // 复用旧 Promise 则日志条数不变。日志位置是 app.getPath('userData') 下的
 // netease.log，plain node 下回退到 os.tmpdir()（见 netapi.js 顶部的桩）。
-// 注意：本测试依赖一次确定性的启动失败。在 plain node、无依赖安装的环境下，
-// 启动会在 require('@neteasecloudmusicapienhanced/api/server.js') 处失败，
-// 满足条件；若将来 CI 先 npm install，启动可能成功，启用时需改为注入失败
-// （例如让 findFreePort/serveNcmApi 失败）再断言重置行为。
+// 注意：本测试依赖一次确定性的启动失败，已通过文件顶部的 net.createServer 桩
+// 强制制造（findFreePort 必然失败），与「有没有 npm install」解耦；不再依赖
+// require('@neteasecloudmusicapienhanced/api/server.js') 一定失败。
 // 另注意：调用 ensureServer 会把 process.env.TEMP/TMP 指到 ncm-tmp 目录，
 // 本文件单独跑在一个进程里（node:test 每个文件一个进程），不影响其他文件。
 test('启动失败后 bootPromise 被重置：下一次调用重新启动而非复用旧 rejected Promise（第 6 项已启用）', async () => {
