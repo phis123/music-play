@@ -12,7 +12,13 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.os }})
+    strategy:
+      # 一个平台红不要遮住另一个平台的结果，两个平台都要看到
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -42,5 +48,11 @@ jobs:
 
       # 单测：node --test 会自动发现 test/*.test.js；每个测试文件独立子进程，
       # 因此 ensure-server 这类会打桩 net / 改 TEMP 的用例不会污染其他文件。
+      #
+      # 为什么要 windows-latest：lib/path-guard 的路径校验用例明确覆盖
+      # 「Windows 盘符大小写变体」「符号链接 realpath」等分支，而这些分支里
+      # 大量判断在 Linux 上走 else/跳过（大小写不敏感、创建工作 symlink 需要
+      # 特权）。只在 ubuntu 跑时，Windows 专属注册表/路径语义永远测不到，
+      # 等于让守门员闭着一只眼。两个平台复用同一个 job 定义，避免两套 yaml 漂移。
       - name: Run unit tests (Node built-in test runner)
         run: npm test
