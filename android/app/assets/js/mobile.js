@@ -1,4 +1,7 @@
-/* music-play 安卓端 · 拆分中（剩余未迁移代码） */
+/* music-play 安卓端 · 入口：装配 + 路由 + 启动。
+ * 加载顺序见 android/app/assets/index.html（core → library → player → views → native-callbacks/events → mobile.js）。
+ * 跨模块共享：MP.state（即原 S）/ MP.bus / MP.bridge / MP.dom / MP.store。
+ */
 'use strict';
 window.MP = window.MP || {};
 
