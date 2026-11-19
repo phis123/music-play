@@ -1,6 +1,6 @@
 # music-play · 项目记忆 / 交接文档
 
-> 最后更新：2026-11-19 11:50（v1.0.9）
+> 最后更新：2026-11-19 12:50（v1.0.10）
 > 用途：新会话/新 Agent 接手时先读本文件；避免重复摸索与踩已知坑。
 
 ---
@@ -9,7 +9,7 @@
 
 | 项 | 值 |
 |---|---|
-| 仓库 | https://github.com/phis123/music-play （默认分支 `main`，v1.0.9 = `df8e997`） |
+| 仓库 | https://github.com/phis123/music-play （默认分支 `main`，v1.0.10 = `67d1ab5`） |
 | 本地克隆 | `E:\dsh\work3\mp` |
 | 产物目录 | `E:\dsh\work3\out`（APK / Setup.exe / src.zip / 报告） |
 | 打包脚本 | `mp/tools/build-apk.mjs`、`mp/tools/music-play.iss`、`E:\dsh\work3\build\build-setup*.mjs`、`E:\dsh\work3\build\push-head.mjs`（API 推送兜底） |
@@ -80,6 +80,8 @@ MainActivity.java      WebView 宿主 + 权限申请 + dev 资源覆盖钩子（
 | 试听时显示上一首封面歌手 | 三处 `A.preview()` 只改图标不改标题/封面 | `enterPreviewMode()` + `previewEx` |
 | 调节悬浮词字号/底色闪退 | View 在 JavaBridge 线程创建、样式在主线程改 | `LyricsOverlay` 全量 `runOnUi` |
 | MediaPlayer 跨线程 | JS 桥/主线程/reopen 线程并发操作 | **`PlayerEngine` 单线程（v1.0.8）** |
+| 歌词自动跟随失效（v1.0.8 回归） | scroll 监听用 120ms 定时器清「程序滚动」标志，而 smooth 滚动持续 200~400ms → 自己的 scroll 被当成用户滚动，每句刷新时间戳 → 永久不跟随 | `scrollLyricsTo()` + 800ms 时间窗 + `scrollend`（v1.0.10） |
+| 「回到当前句」胶囊看不到 | 放在 `overflow-y:auto` 的 `.lp-right` 内，absolute 随内容滚走 | 移到 `.lp-body` + z-index（v1.0.10） |
 
 ---
 
@@ -89,6 +91,7 @@ MainActivity.java      WebView 宿主 + 权限申请 + dev 资源覆盖钩子（
 |---|---|---|
 | ✅ 已完成 v1.0.8 | 播放内核单线程化 + P0/P1/P2 修复 | APK/Setup 已发 |
 | ✅ 已完成 v1.0.9 | 前端模块化（28 模块）+ Electron 45.2.1 + CI 加固（68 单测） | APK/Setup 已发 |
+| ✅ 已完成 v1.0.10 | 修歌词自动跟随回归 + 胶囊定位 | APK/Setup 已发 |
 | P1 | 阶段 4：Electron 主进程/渲染层拆分 | `ipc-registry` 统一注册+校验 |
 | P2 | APK 构建进 CI | 需要容器内 aapt2/jdk |
 | P2 | 下载内容哈希校验 | 目前只有 Content-Length |
@@ -118,6 +121,8 @@ MainActivity.java      WebView 宿主 + 权限申请 + dev 资源覆盖钩子（
 6. **打包 Setup 必须排除 `E:\music-play\resources\*.mp3`**（8.9GB 曲库，否则 Inno 报 4GB 上限）。
 7. **安装签名**：v1.0.x 同签名可覆盖；b73 等旧测试包签名不同需先卸载。
 8. **`inject` 式热更新无效**：`shouldInterceptRequest` 对 `file://` 资产不生效（实测），改前端仍需装包或 dev 目录方案（未验证）。
+9. **区分「程序滚动」与「用户滚动」不要用短定时器清标志**：`scrollTo({behavior:'smooth'})` 是异步的（Chromium 200~400ms），期间 scroll 事件持续触发。曾经用 `setTimeout(120)` 清标志，导致自动跟随自己触发的 scroll 被当成用户滚动 → 跟随永久失效（v1.0.8 引入、v1.0.10 修复）。正确做法：记录「程序滚动调用时刻」+ 时间窗（≥800ms）判定，并用 `scrollend` 提前收尾。
+10. **`position:absolute` 提示层不要放在滚动容器里**：`.lp-right` 是 `overflow-y:auto`，放在里面的 `#lpResume` 胶囊会随歌词滚走（用户几乎看不到）。应挂到 `position:relative` 的非滚动祖先（`.lp-body`）。
 
 ---
 
