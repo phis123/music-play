@@ -61,15 +61,16 @@ test('配对边界：相差 30ms 配对，40ms 不配对', () => {
 test('秒后小数：.5 → 500ms，.123/.12 → 120ms，无小数 → 0ms', () => {
   assert.equal(parseLrc('[00:01.5]A')[0].t, 1500)
   assert.equal(parseLrc('[00:01.12]A')[0].t, 1120)
-  assert.equal(parseLrc('[00:01.123]A')[0].t, 1120)
+  assert.equal(parseLrc('[00:01.123]A')[0].t, 1123)
   assert.equal(parseLrc('[00:01]A')[0].t, 1000)
   assert.equal(parseLrc('[01:02.50]A')[0].t, 62500)
 })
 
-test('同一行多标签不展开，第二个标签原样留在文本里（基线行为）', () => {
+test('一行多时间戳展开成多行（每个时间点各一条）', () => {
   assert.deepEqual(parseLrc('[00:01.00][00:05.00]Hello\n[00:02.00]World'), [
-    { t: 1000, text: '[00:05.00]Hello', pair: null },
+    { t: 1000, text: 'Hello', pair: null },
     { t: 2000, text: 'World', pair: null },
+    { t: 5000, text: 'Hello', pair: null },
   ])
 })
 

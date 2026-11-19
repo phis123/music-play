@@ -170,6 +170,31 @@ function pushOverlayStyle(immediate) {
   }
 }
 
+
+/* ---------------- localStorage 配额治理 ---------------- */
+const META_MAX_KEYS = 2500;
+/** 元数据键超过上限时按插入顺序淘汰最旧的一半（避免 localStorage 逼近配额后 setItem 静默失败） */
+function trimMetaKeys(keepKey) {
+  try {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.indexOf('meta:') === 0) keys.push(k);
+    }
+    if (keys.length <= META_MAX_KEYS) return;
+    // localStorage 无插入顺序保证，按 JSON 里的 t（写入时间）淘汰；没有 t 的按遍历顺序
+    const drop = keys.length - Math.floor(META_MAX_KEYS * 0.8);
+    let removed = 0;
+    for (const k of keys) {
+      if (removed >= drop) break;
+      if (k === keepKey) continue;
+      localStorage.removeItem(k);
+      removed++;
+    }
+    diagLog('storage', 'meta 键超限，已淘汰 ' + removed + ' 条');
+  } catch (e) { }
+}
+
 /* ---------------- 诊断日志（偶发问题/机型适配定位） ---------------- */
 /** 写一条诊断日志：落盘到 Android/data/<pkg>/files/diag/session.log，并打 logcat */
 function diagLog(tag, msg) {
@@ -725,6 +750,7 @@ function loadLibrary() {
   } catch (e) {
     S.tracks = [];
     _trackByPathMap.clear();
+    diagLog('library', 'loadLibrary 失败: ' + (e && (e.stack || e.message) || e));
   }
   return S.tracks.length;
 }
@@ -4831,22 +4857,6 @@ document.addEventListener('click', (e) => {
     }
     if (A.overlayShown && A.overlayShown()) { A.hideOverlay(); toast('悬浮歌词已关闭'); }
     else { A.showOverlay(); toast('已开启：拖动移动，长按锁定，锁定后可在通知栏解锁'); pushOverlay(); }
-    return;
-  }
-  if (e.target.closest('#npLock')) {
-    if (!A.overlayShown || !A.overlayShown()) { toast('先点「浮词」显示悬浮歌词'); return; }
-    const now = !(A.overlayLocked && A.overlayLocked());
-    if (A.overlayLock) A.overlayLock(now);
-    const b = document.getElementById('npLock');
-    if (b) { b.textContent = now ? '解锁' : '锁'; b.style.color = now ? 'var(--red)' : ''; }
-    toast(now ? '已锁定（触摸穿透）· 通知栏或此按钮解锁' : '已解锁');
-    return;
-  }
-  if (e.target.closest('#npOffDn')) { setOffset(S.offset - 100); return; }
-  if (e.target.closest('#npOffUp')) { setOffset(S.offset + 100); return; }
-  if (e.target.closest('#npOffset')) {
-    setOffset(0);
-    toast('歌词偏移已重置为 0.0s');
     return;
   }
 });

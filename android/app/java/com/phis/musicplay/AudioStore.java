@@ -181,17 +181,33 @@ public class AudioStore {
 
     private static synchronized void saveTagCache(Context ctx) {
         if (tagCache == null || !tagCacheDirty) return;
+        File tmp = null;
         try {
-            FileOutputStream fos = new FileOutputStream(cacheFile(ctx));
+            // 原子写：先写临时文件再 rename，避免中断后留下半个 JSON 导致整库重扫
+            File target = cacheFile(ctx);
+            tmp = new File(target.getParentFile(), target.getName() + ".tmp");
+            FileOutputStream fos = new FileOutputStream(tmp);
             fos.write(tagCache.toString().getBytes("UTF-8"));
+            fos.flush();
             fos.close();
+            if (target.exists()) target.delete();
+            if (!tmp.renameTo(target)) throw new java.io.IOException("rename 失败");
             tagCacheDirty = false;
         } catch (Exception ignored) {
+            if (tmp != null) try { tmp.delete(); } catch (Throwable ignored2) { }
         }
     }
 
     private static String cacheKey(File f) {
-        return f.getAbsolutePath() + "|" + f.length() + "|" + f.lastModified();
+        // 用纳秒级 mtime（秒级会在「同尺寸文件同一秒内被覆盖」时命中旧标签）
+        long ns = 0;
+        try { ns = f.toPath().toFile().lastModified(); } catch (Throwable ignored) { }
+        try {
+            java.nio.file.attribute.BasicFileAttributes at =
+                    java.nio.file.Files.readAttributes(f.toPath(), java.nio.file.attribute.BasicFileAttributes.class);
+            ns = at.lastModifiedTime().to(java.util.concurrent.TimeUnit.NANOSECONDS);
+        } catch (Throwable ignored) { }
+        return f.getAbsolutePath() + "|" + f.length() + "|" + ns;
     }
 
     /** 读文件内嵌标签：{title, artist, album, duration}；失败返回 null */
@@ -224,10 +240,13 @@ public class AudioStore {
         } finally {
             try { r.release(); } catch (Exception ignored) { }
         }
-        try {
-            tagCache.put(key, o == null ? new JSONObject() : o);
-            tagCacheDirty = true;
-        } catch (Exception ignored) {
+        // 读取失败不写缓存：否则一次偶发失败会永久把该曲目标签钉成空
+        if (o != null) {
+            try {
+                tagCache.put(key, o);
+                tagCacheDirty = true;
+            } catch (Exception ignored) {
+            }
         }
         return o;
     }
@@ -360,6 +379,8 @@ public class AudioStore {
                 while (c.moveToNext()) {
                     String path = c.getString(iData);
                     if (path == null || path.isEmpty() || !isAudio(path)) continue;
+                    // 索引里残留但磁盘已删除的文件不列出（否则会出现「点了播不了」的幽灵条目）
+                    if (!new File(path).exists()) continue;
                     if (map.containsKey(path)) continue;
                     long durMs = c.getLong(iDur);
                     if (durMs > 0 && durMs < 15000) continue;   // 只在时长已知时跳过铃声

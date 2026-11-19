@@ -102,6 +102,8 @@ const SCAN_CACHE_FILE = 'scan-cache.json'
 const SCAN_CACHE_VERSION = 2
 // 由渲染层“取消”按钮经 'library:scan-cancel' 置位；扫描在每批处理间隙检查。
 let scanCancelRequested = false
+/** 每次扫描的代际号：并发/重叠扫描时旧扫描不会误清新扫描的取消标志 */
+let scanGen = 0
 
 function scanCachePath() {
   return path.join(app.getPath('userData'), SCAN_CACHE_FILE)
@@ -285,6 +287,7 @@ ipcMain.handle('library:scan', async (_e, dir) => {
   root = target
   authorizeDir(target)
   if (dir) saveUserConfig({ root: target })
+  const myGen = ++scanGen
   scanCancelRequested = false
   const sender = _e && _e.sender
   const sendProgress = (p) => {
@@ -355,16 +358,18 @@ ipcMain.handle('library:scan', async (_e, dir) => {
     if (done - lastSent >= 10 || done === limited.length) emitProgress()
   }, () => scanCancelRequested)
   if (scanCancelRequested) emitProgress()
+  const stillCurrent = (myGen === scanGen)
   // 只保留本次扫描到的文件条目（已删除文件的旧缓存随之丢弃，避免缓存文件无界增长）；
   // 取消时只保存已处理部分的条目，未处理文件下次重新解析。
-  saveScanCache(newCache)
+  if (stillCurrent) saveScanCache(newCache)
   tracks.sort((a, b) => a.title.localeCompare(b.title, 'zh'))
   return { root: target, tracks, total, truncated, cancelled: scanCancelRequested }
 })
 
-ipcMain.on('library:scan-cancel', (_e) => {
+ipcMain.on('library:scan-cancel', (_e, gen) => {
   try { verifyIpc(_e) } catch { return }
-  scanCancelRequested = true
+  // 只取消当前代际；不传则视为取消最新一次扫描
+  if (gen == null || +gen === scanGen) scanCancelRequested = true
 })
 
 ipcMain.handle('lyrics:get', async (_e, filePath) => {
@@ -745,7 +750,7 @@ function createFloatWindow() {
   hardenWindowNavigation(floatWin.webContents, FLOAT_HTML_PATH)
   floatWin.setAlwaysOnTop(true, 'screen-saver')
   floatWin.setVisibleOnAllWorkspaces(true)
-  floatWin.loadFile(FLOAT_HTML_PATH)
+  floatWin.loadFile(FLOAT_HTML_PATH).catch((e) => console.warn('[float] 页面加载失败:', e && e.message))
   floatWin.webContents.on('did-finish-load', () => {
     if (floatWin && !floatWin.isDestroyed()) {
       floatWin.webContents.send('float:keyinfo', { key: unlockKey, locked: floatLocked })
@@ -797,9 +802,18 @@ ipcMain.on('float:close', (_e) => {
 })
 ipcMain.on('float:resize', (_e, h) => {
   try { verifyIpc(_e, { allowFloat: true }) } catch { return }
-  if (floatWin && !floatWin.isDestroyed()) {
-    const b = floatWin.getBounds()
-    floatWin.setBounds({ x: b.x, y: b.y + (b.height - h), width: b.width, height: h })
+  if (!floatWin || floatWin.isDestroyed()) return
+  // 校验数值：NaN/负值/超大值会让 setBounds 抛未捕获异常
+  const height = Math.round(Number(h))
+  if (!Number.isFinite(height)) return
+  const maxH = (screen.getPrimaryDisplay().workAreaSize.height || 1080)
+  const next = Math.min(maxH, Math.max(60, height))
+  const b = floatWin.getBounds()
+  if (next === b.height) return
+  try {
+    floatWin.setBounds({ x: b.x, y: b.y + (b.height - next), width: b.width, height: next })
+  } catch (e) {
+    console.warn('[float] resize 失败:', e && e.message)
   }
 })
 
@@ -845,6 +859,9 @@ app.whenReady().then(() => {
   createWindow()
   registerUnlockShortcut()
   netapi.ensureServer().catch((e) => console.warn('[ncm] 启动失败:', e.message))
+}).catch((e) => {
+  console.error('[app] 初始化失败:', e && (e.stack || e.message || e))
+  try { dialog.showErrorBox('music-play 启动失败', String((e && e.message) || e)) } catch { }
 })
 app.on('will-quit', () => {
   globalShortcut.unregisterAll()

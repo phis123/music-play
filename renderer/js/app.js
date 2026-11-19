@@ -372,7 +372,7 @@ const fmt = (s) => {
   return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 }
 const cleanTitle = (t) => String(t || '').replace(/^\d{1,3}\s*[-_.、)\]]\s*/, '').trim() || String(t || '')
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 const toFileUrl = (p) => 'file:///' + String(p).replace(/\\/g, '/').split('/')
   .map((seg, i) => (i === 0 ? seg : encodeURIComponent(seg))).join('/')
 
@@ -3267,6 +3267,17 @@ function bindLyricsInteraction() {
     pane.dataset.bound = '1'
     pane.addEventListener('wheel', markUserScroll, { passive: true })
     pane.addEventListener('touchmove', markUserScroll, { passive: true })
+    // 滚动条拖动 / 键盘 / 触控板滚动不会触发 wheel/touchmove，补一个 scroll 监听（过滤自动跟随）
+    let _autoScrolling = false
+    pane.addEventListener('scroll', () => {
+      if (_autoScrolling) return
+      markUserScroll()
+    }, { passive: true })
+    const _origScrollTo = pane.scrollTo.bind(pane)
+    pane.scrollTo = function (opts, y) {
+      _autoScrolling = true
+      try { return _origScrollTo(opts, y) } finally { setTimeout(() => { _autoScrolling = false }, 120) }
+    }
     pane.addEventListener('click', (e) => {
       const el = e.target.closest('.ly-line')
       if (!el) return
