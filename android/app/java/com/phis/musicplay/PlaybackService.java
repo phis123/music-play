@@ -437,6 +437,22 @@ public class PlaybackService extends Service {
 
     public boolean isPlaying() { return playing; }
 
+    /** 供 Diag 快照引用（避免 Diag 直接读私有字段） */
+    public static volatile String buildTagText = "2026-11-19.09:30-v1.0.7";
+
+    /** 一行式播放状态摘要 */
+    public static String diagState() {
+        PlaybackService s = instance;
+        if (s == null) return "播放状态: 服务未运行";
+        String title = s.curTitle;
+        if (title != null && title.length() > 60) title = title.substring(0, 60) + "…";
+        return "播放状态: playing=" + s.playing + " preparing=" + s.preparing
+                + " ducked=" + s.ducked + " durSec=" + s.durSec
+                + " posMs=" + s.positionMs()
+                + " url=" + (s.lastUrl == null || s.lastUrl.isEmpty() ? "-" : s.lastUrl.replaceAll("[?].*$", ""))
+                + " title=" + title;
+    }
+
     // ---------------- 音频焦点 ----------------
     private AudioFocusRequest focusReq;
 

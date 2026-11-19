@@ -39,6 +39,9 @@ public class MainActivity extends Activity {
         if (isDebuggable && Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
             WebView.setWebContentsDebuggingEnabled(true);
         }
+        // 诊断：全局崩溃捕获 + 会话日志
+        try { Diag.installWithActivity(this); Diag.writeLifecycle(this, "MainActivity.onCreate"); } catch (Throwable ignored) { }
+
         web = new WebView(this) {
             @Override
             protected void onWindowVisibilityChanged(int visibility) {
@@ -149,6 +152,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        try { Diag.writeLifecycle(this, "onResume"); } catch (Throwable ignored) { }
         if (web != null) {
             web.onResume();
             web.resumeTimers();
@@ -159,6 +163,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        try { Diag.writeLifecycle(this, "onPause"); } catch (Throwable ignored) { }
         // 不暂停 WebView JS 计时器，保证后台批量匹配与下载持续运行
         if (web != null) web.resumeTimers();
     }
@@ -184,6 +189,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        try { Diag.writeLifecycle(this, "onDestroy"); } catch (Throwable ignored) { }
         current = null;
         if (player != null) player.release();
         if (web != null) web.destroy();

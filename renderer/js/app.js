@@ -449,6 +449,18 @@ async function playPath(p) {
 const coverQ = []
 let coverBusy = 0
 const coverCache = new Map()
+const COVER_CACHE_MAX = 240
+/** 写入封面缓存并做 LRU 淘汰，避免几千首曲库把渲染进程内存吃满 */
+function cacheCover(path, url) {
+  if (!path) return url
+  if (coverCache.has(path)) coverCache.delete(path)
+  coverCache.set(path, url)
+  if (coverCache.size > COVER_CACHE_MAX) {
+    const first = coverCache.keys().next().value
+    if (first !== undefined) coverCache.delete(first)
+  }
+  return url
+}
 
 function pumpCover() {
   while (coverBusy < 3 && coverQ.length) {
@@ -461,7 +473,7 @@ function pumpCover() {
       continue
     }
     window.api.cover(job.path).then((url) => {
-      coverCache.set(job.path, url)
+      cacheCover(job.path, url)
       job.apply(url)
     }).catch(() => {}).finally(finish)
   }
@@ -3825,6 +3837,36 @@ function bindGlobal() {
     markNavTransition()
     state.listFilter = ''
     render()
+  })
+
+  // 悬浮窗初始状态以主进程为准（托盘/快捷键开的窗也要能同步到 UI）
+  try {
+    const on = await window.api.floatIsOpen()
+    if (on) {
+      state.floatOn = true
+      $('#pbFloat')?.classList.add('active')
+      setTimeout(pushFloat, 400)
+    }
+  } catch { }
+  // 托盘开窗
+  window.api.onFloatOpened?.(() => {
+    state.floatOn = true
+    $('#pbFloat')?.classList.add('active')
+    if (state.lpMiniOpen) renderLpMiniPanel()
+    setTimeout(pushFloat, 300)
+  })
+  // 浮窗被关闭（✕ 或托盘）
+  window.api.onFloatClosed?.(() => {
+    state.floatOn = false
+    state.floatLocked = false
+    $('#pbFloat')?.classList.remove('active')
+    $('#lpGearBtn')?.classList.remove('on')
+    if (state.lpMiniOpen) renderLpMiniPanel()
+  })
+  // 锁定状态由主进程广播，避免 UI 与实际穿透状态相反
+  window.api.onFloatLocked?.((v) => {
+    state.floatLocked = !!v
+    if (state.lpMiniOpen) renderLpMiniPanel()
   })
 
   try {

@@ -254,6 +254,12 @@ public class LyricsOverlay {
         });
     }
 
+    /** 一行式悬浮词状态摘要（供诊断快照） */
+    public String diagState() {
+        return "悬浮词: showing=" + showing + " locked=" + locked
+                + " color=#" + Integer.toHexString(color) + " sizeSp=" + fontSizeSp + " bgAlpha=" + bgAlpha;
+    }
+
     private int dp(int v) {
         return (int) (v * ctx.getResources().getDisplayMetrics().density);
     }

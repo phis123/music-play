@@ -261,6 +261,41 @@ public class Bridge {
         try { return AudioStore.rescan(act); } catch (Exception e) { return 0; }
     }
 
+    // ---------------- 诊断（日志导出 / 快照） ----------------
+    /** JS 侧写一条诊断日志（会落盘 + logcat） */
+    @JavascriptInterface
+    public void diagLog(String tag, String msg) {
+        try { Diag.writeApp(act, tag == null ? "js" : tag, msg == null ? "" : msg); } catch (Throwable ignored) { }
+    }
+
+    /** 读取当前快照文本（JS 可直接展示/复制） */
+    @JavascriptInterface
+    public String diagSnapshot() {
+        try { return Diag.snapshot(act); } catch (Throwable t) { return "snapshot failed: " + t; }
+    }
+
+    /** 生成的诊断包绝对路径，供前端提示用户位置 */
+    @JavascriptInterface
+    public String diagExport() {
+        try { return Diag.export(act); } catch (Throwable t) { return ""; }
+    }
+
+    @JavascriptInterface
+    public String diagLastExport() {
+        try { return Diag.lastExportPath(); } catch (Throwable t) { return ""; }
+    }
+
+    /** 前端状态（localStorage 摘要等），会写进导出包的 state.json */
+    @JavascriptInterface
+    public void diagState(String json) {
+        try { Diag.writeState(act, json == null ? "{}" : json); } catch (Throwable ignored) { }
+    }
+
+    @JavascriptInterface
+    public void diagClear() {
+        try { Diag.clear(act); } catch (Throwable ignored) { }
+    }
+
     /** 上一次扫描时系统媒体库是否可用（false = 缺 READ_MEDIA_AUDIO 权限或索引为空） */
     @JavascriptInterface
     public boolean mediaStoreOk() {

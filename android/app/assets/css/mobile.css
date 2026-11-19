@@ -812,6 +812,15 @@ dialog.sheet-dlg.open .sheet { transform: none; }
 }
 .npset-chip.on { background: var(--red-soft); color: var(--red); border-color: rgba(236,65,65,.35); }
 
+/* 诊断快照：等宽 + 可横向滚动，避免长行把弹层撑破 */
+.diag-pre {
+  margin: 4px 0 12px; padding: 12px; max-height: 56vh; overflow: auto;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px; line-height: 1.5; white-space: pre; color: var(--text-2);
+  -webkit-overflow-scrolling: touch;
+}
+
 
 
 

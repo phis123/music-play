@@ -3,9 +3,12 @@
 ## Android APK
 
 ```bash
-node tools/build-apk.mjs <repoRoot> <outApk> <versionName> <versionCode>
-# 例：
-node tools/build-apk.mjs . out/music-play-1.0.0.apk 1.0.0 100
+# versionName/versionCode 可省略：默认取 package.json，versionCode 由 semver 推导（1.0.7 -> 107）
+APK_KEYSTORE=/path/rel.jks APK_KS_PASS=*** APK_KS_ALIAS=musicplay \
+  node tools/build-apk.mjs . out/music-play-1.0.7.apk
+
+# 显式指定版本时注意 versionCode 必须大于已安装版本，否则真机报 INSTALL_FAILED_VERSION_DOWNGRADE
+node tools/build-apk.mjs . out/x.apk 1.0.8 108
 ```
 
 依赖（可用环境变量覆盖默认路径）：
@@ -14,7 +17,7 @@ node tools/build-apk.mjs . out/music-play-1.0.0.apk 1.0.0 100
 |---|---|---|
 | `ANDROID_SDK_ROOT` | `E:/android-toolchain/android-sdk` | 需含 `build-tools/34.0.0` 与 `platforms/android-34` |
 | `JAVA_HOME` | `E:/android-toolchain/jdk/jdk-17.0.20.1+1` | JDK 17 |
-| `APK_KEYSTORE` / `APK_KS_PASS` / `APK_KS_ALIAS` | 本地发布密钥 | 签名用；密钥请自行备份，丢失后无法再出可覆盖升级的同签包 |
+| `APK_KEYSTORE` / `APK_KS_PASS` / `APK_KS_ALIAS` | **无默认值，必须显式设置** | 签名用；口令不提供默认值（避免进入仓库历史），脚本改用 `--ks-pass env:` 传参以免出现在进程命令行。密钥请自行备份，丢失后无法再出可覆盖升级的同签包 |
 | `APK_WORK_DIR` | `.apk-work` | 中间产物目录 |
 
 ### ⚠️ 构建陷阱：aapt2 在 Windows 上会把子目录资产写成反斜杠
@@ -45,6 +48,19 @@ APK 能装能开，但 WebView 按 `css/mobile.css` 找不到文件 → **CSS �
 ```bash
 music-play-Setup-1.0.0.exe /VERYSILENT /SUPPRESSMSGBOXES /TASKS= /NOICONS /DIR=<临时目录>
 ```
+
+## 诊断日志（偶发问题 / 机型适配）
+
+App 内置诊断采集，**用户无需 root、无需连电脑**：
+
+- 设置 → 《设置》页 → 「🧾 诊断与日志导出」→「📦 导出诊断包」，生成
+  `Android/data/com.phis.musicplay/files/diag/export-<时间>.zip`，内含：
+  `session.log`（运行日志）、`crash-*.txt`（崩溃堆栈）、`snapshot.txt`
+  （机型/屏幕/WebView/权限/存储/电量/播放状态）、`library.json`（曲库摘要，不含音频）、
+  `logcat.txt`（本进程日志尾部）、`state.json`（前端设置与队列摘要）。
+- 维护者也可**不动界面**触发：
+  `adb shell am broadcast -n com.phis.musicplay/.DiagReceiver -a com.phis.musicplay.DIAG_EXPORT`
+  （必须带 `-n`：Android 8+ 不接受隐式广播到 manifest receiver）。
 
 ## 发布
 

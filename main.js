@@ -267,6 +267,21 @@ ipcMain.handle('library:scan', async (_e, dir) => {
   if (!st || !st.isDirectory()) {
     return { root, tracks: [], error: 'PATH_INVALID：目录不存在或不是目录' }
   }
+  // 安全：渲染层传来的 dir 不可信，只允许扫描「已授权目录」。
+  // 新目录的唯一入口是 dialog:pickFolder（用户显式选择后 authorizeDir）。
+  if (dir) {
+    let authorized = isInsideLibrary(target)
+    if (!authorized) {
+      // 兼容：配置里记录的 root 在 loadUserConfig 时已授权，但 dir 往往带尾分隔符/大小写差异
+      try {
+        const cfgRoot = loadUserConfig() && loadUserConfig().root
+        if (cfgRoot && path.resolve(cfgRoot) === path.resolve(target)) authorized = true
+      } catch { /* 忽略 */ }
+    }
+    if (!authorized) {
+      return { root, tracks: [], error: 'PATH_NOT_AUTHORIZED：目录未经用户选择授权，请使用「选择目录」' }
+    }
+  }
   root = target
   authorizeDir(target)
   if (dir) saveUserConfig({ root: target })
@@ -527,16 +542,25 @@ ipcMain.handle('lib:fav', async (_e, { filePath, on }) => {
     const checkedSrc = assertInsideLibrary(filePath)
     const dir = path.join(root, FAV_DIR_NAME)
     await fsp.mkdir(dir, { recursive: true })
+    // 收藏目录本身若是指向库外的符号链接/junction，一律拒绝，避免复制或删除落到库外
+    if (!isInsideLibrary(dir)) return { ok: false, reason: 'FAV_DIR_OUTSIDE_LIBRARY：收藏目录不在曲库内' }
     const dst = path.join(dir, path.basename(checkedSrc))
     const srcLrc = checkedSrc.replace(/\.[^.]+$/, '.lrc')
     const dstLrc = dst.replace(/\.[^.]+$/, '.lrc')
+    // 派生目标做符号链接防护（已存在且指向库外则拒绝）
+    let safeDst = dst
+    let safeDstLrc = dstLrc
+    try { safeDst = assertSafeWriteTarget(dst) } catch { return { ok: false, reason: 'FAV_DST_UNSAFE：收藏目标路径不安全' } }
+    try { safeDstLrc = assertSafeWriteTarget(dstLrc) } catch { safeDstLrc = '' }
     if (on) {
-      if (!fs.existsSync(dst)) await fsp.copyFile(checkedSrc, dst)
-      if (fs.existsSync(srcLrc) && isInsideLibrary(srcLrc) && !fs.existsSync(dstLrc)) await fsp.copyFile(srcLrc, dstLrc)
-      return { ok: true, file: dst }
+      if (!fs.existsSync(safeDst)) await fsp.copyFile(checkedSrc, safeDst)
+      if (safeDstLrc && fs.existsSync(srcLrc) && isInsideLibrary(srcLrc) && !fs.existsSync(safeDstLrc)) {
+        await fsp.copyFile(srcLrc, safeDstLrc)
+      }
+      return { ok: true, file: safeDst }
     }
-    if (fs.existsSync(dst)) await fsp.unlink(dst)
-    if (fs.existsSync(dstLrc)) await fsp.unlink(dstLrc)
+    if (fs.existsSync(safeDst) && isInsideLibrary(safeDst)) await fsp.unlink(safeDst)
+    if (safeDstLrc && fs.existsSync(safeDstLrc) && isInsideLibrary(safeDstLrc)) await fsp.unlink(safeDstLrc)
     return { ok: true }
   } catch (e) {
     return { ok: false, reason: String(e.message || e) }
@@ -730,6 +754,8 @@ function createFloatWindow() {
   floatWin.on('closed', () => {
     floatWin = null
     floatLocked = false
+    // 通知主窗：悬浮窗真的关了（否则主窗一直以为它还开着，pushFloat 空转）
+    try { if (win && !win.isDestroyed()) win.webContents.send('float:closed') } catch { }
     try { if (tray) { tray.destroy(); tray = null } } catch { }
   })
   return floatWin
@@ -801,7 +827,7 @@ function createWindow() {
     if (floatWin && !floatWin.isDestroyed()) floatWin.close()
     win = null
   })
-  win.loadFile(INDEX_HTML_PATH)
+  win.loadFile(INDEX_HTML_PATH).catch((e) => console.warn('[win] 主页面加载失败:', e && e.message))
 }
 
 let floatLocked = false
@@ -811,6 +837,8 @@ function setFloatLock(locked) {
     floatWin.setIgnoreMouseEvents(floatLocked, { forward: true })
     floatWin.webContents.send('float:locked', floatLocked)
   }
+  // 主窗也要知道锁定状态，否则「锁定穿透」按钮会显示成相反状态
+  try { if (win && !win.isDestroyed()) win.webContents.send('float:locked', floatLocked) } catch { }
 }
 
 app.whenReady().then(() => {
