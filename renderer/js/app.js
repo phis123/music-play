@@ -2609,37 +2609,20 @@ function playNextInsert(t) {
   toast('已设为下一首播放：' + cleanTitle(t.title))
 }
 
+// 三策略算法已下沉到 lib/random.js（纯函数，可被单测直接覆盖）；
+// 这里只做「渲染层状态 → 纯函数入参」的适配，避免测试里重抄一份实现。
 function pickNextShuffleIndex() {
-  const n = state.queuePaths.length
-  if (n <= 1) return 0
-  const strat = state.randomStrategy || 'no-repeat'
-  if (strat === 'true-random') {
-    let idx = state.qPos
-    while (idx === state.qPos) idx = Math.floor(Math.random() * n)
-    return idx
+  // 兜底：若 lib/random.js 未加载（旧安装包缺文件），退化为真随机，绝不让「切随机」直接抛错
+  if (typeof MusicPlayRandom === 'undefined' || !MusicPlayRandom.pickNextShuffleIndex) {
+    return Math.floor(Math.random() * Math.max(1, state.queuePaths.length))
   }
-  // 不重复随机 / 不常听优先随机：本轮未播池
-  if (state.qPos >= 0) state.shufflePlayed.add(state.queuePaths[state.qPos])
-  let unplayed = []
-  for (let i = 0; i < n; i++) {
-    if (i !== state.qPos && !state.shufflePlayed.has(state.queuePaths[i])) {
-      unplayed.push(i)
-    }
-  }
-  if (!unplayed.length) {
-    state.shufflePlayed.clear()
-    if (state.qPos >= 0) state.shufflePlayed.add(state.queuePaths[state.qPos])
-    for (let i = 0; i < n; i++) {
-      if (i !== state.qPos) unplayed.push(i)
-    }
-  }
-  if (strat === 'rare-first' && unplayed.length > 1) {
-    // 按播放次数升序排序，从播放最少的前 35% 池中随机抽取
-    unplayed.sort((a, b) => getPlayCount(state.queuePaths[a]) - getPlayCount(state.queuePaths[b]))
-    const poolSize = Math.max(1, Math.ceil(unplayed.length * 0.35))
-    return unplayed[Math.floor(Math.random() * poolSize)]
-  }
-  return unplayed[Math.floor(Math.random() * unplayed.length)]
+  return MusicPlayRandom.pickNextShuffleIndex({
+    queuePaths: state.queuePaths,
+    qPos: state.qPos,
+    strategy: state.randomStrategy || 'no-repeat',
+    playedSet: state.shufflePlayed,
+    playCountOf: getPlayCount,
+  })
 }
 
 function stepQueue(delta, autoEnded) {
