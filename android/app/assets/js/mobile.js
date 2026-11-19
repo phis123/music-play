@@ -3475,33 +3475,16 @@ function updatePlayingRowInPlace() {
   });
 }
 
+// 三策略算法已下沉到 assets/js/random.js（与桌面端 lib/random.js 逐字节同步的
+// 普通 script 副本，Android WebView 不能 require）；这里只做状态适配。
 function pickNextShuffleIndexMobile() {
-  const n = S.queuePaths.length;
-  if (n <= 1) return 0;
-  const strat = S.randomStrategy || 'no-repeat';
-  if (strat === 'true-random') {
-    let idx = S.cur;
-    while (idx === S.cur) idx = Math.floor(Math.random() * n);
-    return idx;
-  }
-  if (S.cur >= 0 && S.queuePaths[S.cur]) S.shufflePlayed.add(S.queuePaths[S.cur]);
-  const unplayed = [];
-  for (let i = 0; i < n; i++) {
-    if (i !== S.cur && !S.shufflePlayed.has(S.queuePaths[i])) unplayed.push(i);
-  }
-  if (!unplayed.length) {
-    S.shufflePlayed.clear();
-    if (S.cur >= 0 && S.queuePaths[S.cur]) S.shufflePlayed.add(S.queuePaths[S.cur]);
-    for (let i = 0; i < n; i++) {
-      if (i !== S.cur) unplayed.push(i);
-    }
-  }
-  if (strat === 'rare-first' && unplayed.length > 1) {
-    unplayed.sort((a, b) => getPlayCount(S.queuePaths[a]) - getPlayCount(S.queuePaths[b]));
-    const poolSize = Math.max(1, Math.ceil(unplayed.length * 0.35));
-    return unplayed[Math.floor(Math.random() * poolSize)];
-  }
-  return unplayed[Math.floor(Math.random() * unplayed.length)];
+  return MusicPlayRandom.pickNextShuffleIndex({
+    queuePaths: S.queuePaths,
+    qPos: S.cur,
+    strategy: S.randomStrategy || 'no-repeat',
+    playedSet: S.shufflePlayed,
+    playCountOf: getPlayCount,
+  });
 }
 
 function playAt(list, i) {
