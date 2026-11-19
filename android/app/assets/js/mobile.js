@@ -211,6 +211,34 @@ function diagCollectState() {
   }, null, 2);
 }
 
+/**
+ * 导出诊断包（UI 按钮与原生广播共用）：
+ * 先让原生写入前端状态 state.json，再触发原生打包，最后把路径回显到设置页。
+ */
+function runDiagExport(from) {
+  try {
+    diagLog('diag', (from || 'ui') + ' 触发导出诊断包');
+    if (A && typeof A.diagState === 'function') A.diagState(diagCollectState());
+    const p = (A && typeof A.diagExport === 'function') ? A.diagExport() : '';
+    if (p) {
+      S.diagLastPath = p;
+      try { render(); } catch (e) { }
+      toast('诊断包已生成：' + p);
+      diagLog('diag', '导出完成 ' + p);
+    } else {
+      toast('导出失败，请确认存储可用');
+      diagLog('diag', '导出失败（原生返回空路径）');
+    }
+    return p;
+  } catch (err) {
+    toast('导出异常：' + (err.message || err));
+    diagLog('diag', '导出异常 ' + (err && err.stack ? err.stack : err));
+    return '';
+  }
+}
+/** 供原生广播调用：窗口未解锁/用户不在场时也能跑完整前端导出路径 */
+window.__diagFromNative = function () { return runDiagExport('native-broadcast'); };
+
 let _diagHooked = false;
 function hookDiag() {
   if (_diagHooked) return;
@@ -4473,20 +4501,7 @@ document.addEventListener('click', (e) => {
     e.stopPropagation();
     const kind = diagBtn.dataset.diag;
     if (kind === 'export') {
-      try {
-        diagLog('ui', '用户点击导出诊断包');
-        if (A && typeof A.diagState === 'function') A.diagState(diagCollectState());
-        const p = (A && typeof A.diagExport === 'function') ? A.diagExport() : '';
-        if (p) {
-          S.diagLastPath = p;
-          render();
-          toast('诊断包已生成：' + p);
-        } else {
-          toast('导出失败，请确认存储可用');
-        }
-      } catch (err) {
-        toast('导出异常：' + (err.message || err));
-      }
+      runDiagExport('ui');
       return;
     }
     if (kind === 'snapshot') {
