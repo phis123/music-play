@@ -2612,6 +2612,10 @@ function playNextInsert(t) {
 // 三策略算法已下沉到 lib/random.js（纯函数，可被单测直接覆盖）；
 // 这里只做「渲染层状态 → 纯函数入参」的适配，避免测试里重抄一份实现。
 function pickNextShuffleIndex() {
+  // 兜底：若 lib/random.js 未加载（旧安装包缺文件），退化为真随机，绝不让「切随机」直接抛错
+  if (typeof MusicPlayRandom === 'undefined' || !MusicPlayRandom.pickNextShuffleIndex) {
+    return Math.floor(Math.random() * Math.max(1, state.queuePaths.length))
+  }
   return MusicPlayRandom.pickNextShuffleIndex({
     queuePaths: state.queuePaths,
     qPos: state.qPos,

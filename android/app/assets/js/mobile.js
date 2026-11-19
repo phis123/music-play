@@ -3478,6 +3478,10 @@ function updatePlayingRowInPlace() {
 // 三策略算法已下沉到 assets/js/random.js（与桌面端 lib/random.js 逐字节同步的
 // 普通 script 副本，Android WebView 不能 require）；这里只做状态适配。
 function pickNextShuffleIndexMobile() {
+  // 兜底：assets/js/random.js 缺失时退化为真随机
+  if (typeof MusicPlayRandom === 'undefined' || !MusicPlayRandom.pickNextShuffleIndex) {
+    return Math.floor(Math.random() * Math.max(1, S.queuePaths.length))
+  }
   return MusicPlayRandom.pickNextShuffleIndex({
     queuePaths: S.queuePaths,
     qPos: S.cur,
