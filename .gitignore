@@ -42,3 +42,4 @@ _*.txt
 _*.log
 _*.json
 _screen*.png
+tools/.tmp-*
