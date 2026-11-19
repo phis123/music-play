@@ -424,6 +424,7 @@ body {
   position: absolute;
   right: 26px;
   bottom: 22px;
+  z-index: 6;
   padding: 7px 16px;
   border-radius: 999px;
   background: var(--red);

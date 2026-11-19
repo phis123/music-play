@@ -3172,14 +3172,17 @@ function syncLyrics(force) {
 
   // 首句（或还没到第一句）→ 顶部对齐；其余居中
   if (idx <= 0) {
-    pane.scrollTo({ top: 0, behavior: force ? 'auto' : 'smooth' })
+    scrollLyricsTo(0, !force)
   } else {
     const el = kids[idx]
     if (!el) return
     const top = el.offsetTop - pane.clientHeight / 2 + el.offsetHeight / 2
-    pane.scrollTo({ top: Math.max(0, top), behavior: force ? 'auto' : 'smooth' })
+    scrollLyricsTo(top, !force)
   }
-  if (force) { $('#lpResume')?.classList.add('hidden'); state.lastUserScrollAt = 0 }
+  // 自动跟随恢复（无论 force 还是 3 秒静默后自动恢复）都要收起「回到当前句」胶囊，
+  // 否则用户滚过一次、3 秒后自动恢复了，胶囊还会一直挂在那里。
+  if (force) state.lastUserScrollAt = 0
+  $('#lpResume')?.classList.add('hidden')
 }
 
 /* ---------------- 开头静音测量 + 歌词偏移 ---------------- */
@@ -3243,6 +3246,21 @@ function resumeFollow() {
   $('#lpResume')?.classList.add('hidden')
   syncLyrics(true)
 }
+/** 最近一次「程序自动滚动」的时刻；用于把自动跟随产生的 scroll 事件与用户滚动区分开 */
+let lyricsAutoScrollAt = 0
+
+/** 歌词区唯一的程序滚动入口（禁止直接调 pane.scrollTo，否则会被当成用户滚动） */
+function scrollLyricsTo(top, smooth) {
+  const pane = document.querySelector('.lp-right')
+  if (!pane) return
+  lyricsAutoScrollAt = Date.now()
+  try {
+    pane.scrollTo({ top: Math.max(0, Math.round(top)), behavior: smooth ? 'smooth' : 'auto' })
+  } catch (e) {
+    pane.scrollTop = Math.max(0, Math.round(top))
+  }
+}
+
 function bindLyricsInteraction() {
   const pane = document.querySelector('.lp-right')
   if (!pane) return
@@ -3250,17 +3268,24 @@ function bindLyricsInteraction() {
     pane.dataset.bound = '1'
     pane.addEventListener('wheel', markUserScroll, { passive: true })
     pane.addEventListener('touchmove', markUserScroll, { passive: true })
-    // 滚动条拖动 / 键盘 / 触控板滚动不会触发 wheel/touchmove，补一个 scroll 监听（过滤自动跟随）
-    let _autoScrolling = false
+    // 滚动条拖动 / 触控板两指滚动不会触发 wheel，靠 scroll 事件兜底。
+    // 必须能区分「自动跟随滚动」与「用户滚动」，否则自动跟随会被自己触发而永久失效：
+    //   - 平滑滚动是异步的（Chromium 约 200~400ms），期间 scrollTop 还会经过中间值，
+    //     所以不能用「位置是否等于目标」判断，也不能用一个很短的定时器清理标志；
+    //   - 用「最近一次程序滚动调用时刻」的时间窗判定，并用 scrollend 提前收尾。
     pane.addEventListener('scroll', () => {
-      if (_autoScrolling) return
+      if (Date.now() - lyricsAutoScrollAt < 800) return   // 程序滚动窗口内，忽略
       markUserScroll()
     }, { passive: true })
-    const _origScrollTo = pane.scrollTo.bind(pane)
-    pane.scrollTo = function (opts, y) {
-      _autoScrolling = true
-      try { return _origScrollTo(opts, y) } finally { setTimeout(() => { _autoScrolling = false }, 120) }
-    }
+    // Chromium 114+ 支持 scrollend：平滑滚动结束时立刻关闭窗口，避免误吞用户滚动
+    pane.addEventListener('scrollend', () => { lyricsAutoScrollAt = 0 }, { passive: true })
+    // 键盘翻页/方向键滚动
+    pane.addEventListener('keydown', (e) => {
+      if (e.key === 'PageUp' || e.key === 'PageDown' || e.key === 'ArrowUp' ||
+          e.key === 'ArrowDown' || e.key === 'Home' || e.key === 'End') {
+        markUserScroll()
+      }
+    })
     pane.addEventListener('click', (e) => {
       const el = e.target.closest('.ly-line')
       if (!el) return
