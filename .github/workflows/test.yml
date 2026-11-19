@@ -1,16 +1,37 @@
 name: test
 
+# CI 原来只跑 `npm test`：不装依赖、没有语法守门、只有 Linux。
+# 结果就是「假绿」——渲染层/Android 里的低级语法错误、Windows 特有的
+# 路径大小写与符号链接分支从来没有被 CI 触达。
 on:
   push:
   pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+          # 注意：不能写 cache: 'npm'。仓库当前没有 package-lock.json，
+          # setup-node 的 npm 缓存需要 lockfile 才能算出 key，否则直接报错。
+
+      # 为什么现在 npm install 而不是 `npm ci`：仓库还没有 lockfile
+      # （package-lock.json 未入库），`npm ci` 会直接失败。
+      # 先不引入 lockfile 的原因：这一版目标是把 CI 从「假绿」改成真守门员，
+      # 引入 lockfile 会把依赖树一次性冻结进仓库，属于独立的依赖治理变更
+      # （涉及 Electron 31→44 升级的 P1 任务）；在升级完成前加 lockfile 会让
+      # 每次版本调整都产生巨大 diff，也会把当前 unpinned 的传递依赖固化下来。
+      # 因此这里先按 semver 范围安装（--no-audit/--no-fund 只为减少 CI 噪音），
+      # 后续真正要可复现构建时，再单独提交 package-lock.json 并把这里换成 npm ci。
+      - name: Install dependencies (no lockfile yet → npm install)
+        run: npm install --no-audit --no-fund
+
       - name: Run unit tests (Node built-in test runner)
         run: npm test
