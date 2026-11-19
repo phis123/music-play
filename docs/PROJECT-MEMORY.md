@@ -1,6 +1,6 @@
 # music-play · 项目记忆 / 交接文档
 
-> 最后更新：2026-11-19 11:00（v1.0.8）
+> 最后更新：2026-11-19 11:50（v1.0.9）
 > 用途：新会话/新 Agent 接手时先读本文件；避免重复摸索与踩已知坑。
 
 ---
@@ -9,7 +9,7 @@
 
 | 项 | 值 |
 |---|---|
-| 仓库 | https://github.com/phis123/music-play （默认分支 `main`） |
+| 仓库 | https://github.com/phis123/music-play （默认分支 `main`，v1.0.9 = `df8e997`） |
 | 本地克隆 | `E:\dsh\work3\mp` |
 | 产物目录 | `E:\dsh\work3\out`（APK / Setup.exe / src.zip / 报告） |
 | 打包脚本 | `mp/tools/build-apk.mjs`、`mp/tools/music-play.iss`、`E:\dsh\work3\build\build-setup*.mjs`、`E:\dsh\work3\build\push-head.mjs`（API 推送兜底） |
@@ -59,11 +59,12 @@ Diag.java / DiagReceiver.java  诊断：会话日志、崩溃捕获、环境快�
 MainActivity.java      WebView 宿主 + 权限申请 + dev 资源覆盖钩子（未验证可用）
 ```
 
-### Android 前端
-`assets/js/mobile.js`（约 4700 行，单体）——**阶段 3 待拆分**；`neta.js` 网络；`core/` 尚不存在。
+### Android 前端（v1.0.9 已模块化）
+`assets/js/mobile.js` = **82 行入口**；模块在 `core/ library/ player/ views/` + `diag.js` + `native-callbacks.js` + `events.js`。
+零构建：`<script>` + `window.MP`（`MP.state` 即原 `S`，`MP.bus` 事件总线）。加载顺序 core→library→player(random.js 先于 queue.js)→views→回调→入口。
 
-### Electron 桌面
-`main.js`（约 840 行）+ `preload.js` + `renderer/js/app.js`（约 3900 行）。**阶段 4 待拆分**。
+### Electron 桌面（v1.0.9 起 Electron 45.2.1）
+`main.js`（约 840 行）+ `preload.js` + `renderer/js/app.js`（约 3900 行）。**阶段 4 待拆分**。Electron 45 打包必须整目录复制 dist（无 libEGL/libGLESv2）。
 打包是**自建便携包**：`music-play.exe`（启动器）+ `music-play-core.exe`（改名 electron.exe）+ `resources/app`。
 
 ---
@@ -86,11 +87,11 @@ MainActivity.java      WebView 宿主 + 权限申请 + dev 资源覆盖钩子（
 
 | 优先级 | 任务 | 备注 |
 |---|---|---|
-| P0（进行中） | 发 v1.0.8 Release | 产物已构建 |
-| P1 | Electron 31 → 44/45 升级 | 31 已 EOL（2025-01-14）；需验证透明悬浮词/鼠标穿透/WebAudio/IPC/托盘 |
-| P1 | 阶段 3：`mobile.js` 模块化 | **必须可回滚**；按 views 逐个迁移，事件总线替代直接改 `S` |
+| ✅ 已完成 v1.0.8 | 播放内核单线程化 + P0/P1/P2 修复 | APK/Setup 已发 |
+| ✅ 已完成 v1.0.9 | 前端模块化（28 模块）+ Electron 45.2.1 + CI 加固（68 单测） | APK/Setup 已发 |
 | P1 | 阶段 4：Electron 主进程/渲染层拆分 | `ipc-registry` 统一注册+校验 |
-| P2 | 阶段 5：CI 加固 | 装依赖、`node --check`、Windows matrix、APK 构建进 CI |
+| P2 | APK 构建进 CI | 需要容器内 aapt2/jdk |
+| P2 | 下载内容哈希校验 | 目前只有 Content-Length |
 | P2 | 下载内容哈希校验 | 目前只有 Content-Length |
 | P2 | 大曲库扫描单测 | 需先把扫描逻辑下沉到 `lib/library-scan.js` |
 | P2 | 沙箱冒烟 | 自动化一直在 `no-sandbox` 下跑（`DSH_SESSION_ID` 存在） |
@@ -99,7 +100,7 @@ MainActivity.java      WebView 宿主 + 权限申请 + dev 资源覆盖钩子（
 
 ## 五、回滚策略（重要）
 
-1. **发版前打锚点 tag**：`v1.0.8` 与 `rollback/pre-modularize-1.0.8`。
+1. **发版前打锚点 tag**：`v1.0.9`，模块化前锚点 `rollback/pre-modularize-1.0.8`。Electron 回滚=重装 `Setup-1.0.8.exe`。
 2. **每个重构阶段单独分支**：`chore/electron-upgrade`、`refactor/mobile-modules`、`refactor/electron-modules`。
 3. **不直接改 main**：用仓库副本（`E:\dsh\work3\branches\<name>`）做实验，产出 patch + 报告，我核验后再合并。
 4. 合并顺序：单测 → 真机冒烟 → 推送；任何一步失败 `git revert` 单个提交即可（每阶段一个提交）。
