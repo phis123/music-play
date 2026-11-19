@@ -24,8 +24,23 @@ public class DiagReceiver extends BroadcastReceiver {
             Diag.attach(context);
             if (ACTION_EXPORT.equals(action)) {
                 Diag.write("broadcast", "收到导出请求");
-                String path = Diag.export(context);
-                Diag.write("broadcast", "导出结果=" + path);
+                // 若界面还在（即使锁屏在后台），优先走前端路径：能一并写入 state.json
+                final MainActivity a = MainActivity.current;
+                if (a != null && a.webView != null) {
+                    Diag.write("broadcast", "转交前端执行导出（含 state.json）");
+                    a.runOnUiThread(() -> {
+                        try {
+                            a.webView.evaluateJavascript(
+                                    "window.__diagFromNative&&window.__diagFromNative()", null);
+                        } catch (Throwable t) {
+                            Diag.write("broadcast", "前端导出失败，回退原生导出: " + t);
+                            Diag.export(a.getApplicationContext());
+                        }
+                    });
+                } else {
+                    String path = Diag.export(context);
+                    Diag.write("broadcast", "界面不在，原生导出结果=" + path);
+                }
             } else if (ACTION_CLEAR.equals(action)) {
                 Diag.clear(context);
                 Diag.write("broadcast", "已清空日志");
