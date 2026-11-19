@@ -4507,7 +4507,8 @@ document.addEventListener('click', (e) => {
     if (kind === 'snapshot') {
       let txt = '';
       try { txt = (A && typeof A.diagSnapshot === 'function') ? A.diagSnapshot() : ''; } catch (err) { txt = '读取失败：' + err; }
-      S.diagSnapshotText = txt || '（快照为空）';
+      diagLog('ui', '查看快照 len=' + (txt ? txt.length : 0) + ' head=' + String(txt || '').slice(0, 60).replace(/\s+/g, ' '));
+      S.diagSnapshotText = txt || '（快照为空：原生未返回内容）';
       openSheet('diagsnap', null);
       return;
     }
