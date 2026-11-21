@@ -35,10 +35,11 @@ test('启动前 getPort() 为 0（服务惰性启动，未被调用）', () => {
   assert.equal(netapi.getPort(), 0)
 })
 
-// TODO(第 6 项“网易云 API 启动失败重试”合并后启用)：基线 ensureServer 在
-// catch 里只记日志、重抛，不把 bootPromise 置回 null（基线 netapi.js:64-67），
-// 此后每次调用都在基线 netapi.js:38 直接返回同一个已 rejected 的 Promise，
-// 全部网易云功能永久失败直到重启（核实报告 §6）。
+// 对应第 6 项“网易云 API 启动失败重试”，该项已合并、断言已启用（不再是 skip）：
+// 基线 ensureServer 在 catch 里只记日志、重抛，不把 bootPromise 置回 null
+// （基线 netapi.js:64-67），此后每次调用都在基线 netapi.js:38 直接返回同一个已
+// rejected 的 Promise，全部网易云功能永久失败直到重启（核实报告 §6）；第 6 项
+// 修好后，本用例作为「重启而非复用旧 Promise」的回归守门。
 // 判定方法：不要用 `ensureServer() !== ensureServer()` 比 Promise 身份——
 // ensureServer 本身是 async 函数，每次调用都会包一层新的 Promise，
 // 即使内部复用同一个 bootPromise，身份也不同（已实测：该写法在基线上误通过）。
