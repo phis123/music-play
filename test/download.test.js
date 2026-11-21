@@ -88,13 +88,11 @@ test('空 body 的 200：resolve { bytes: 0 }，落盘空文件', async (t) => {
   assert.equal(fs.statSync(file).size, 0)
 })
 
-// TODO(第 5 项“下载逻辑可靠性”合并后启用)：以下两个测试断言的是第 5 项
-// 应有的行为，不是基线行为。已在基线 b628e7a 上实测确认它们目前不通过：
-// 截断响应（Content-Length: 10，只发 5 字节后断开）时，基线 downloadTo 的
-// Promise 永久不 settle（5 秒无返回、无 reject），且磁盘残留 5 字节半截文件
-// ——因为缺少 res.on('error') 且 finish 时从不比较 got/total（核实报告 §5）。
-// 直接取消 skip 会让测试套件挂起，所以先用 test.skip 占位；第 5 项 patch
-// （失败清理 + got/total 校验 + res.on('error')）合并后再取消 skip。
+// 以下两个测试对应第 5 项“下载逻辑可靠性”，该项已合并、断言已启用（不再是 skip）：
+// 基线 b628e7a 上它们不通过——截断响应（Content-Length: 10，只发 5 字节后断开）时，
+// 基线 downloadTo 的 Promise 永久不 settle，且磁盘残留 5 字节半截文件（缺少
+// res.on('error')、finish 时从不比较 got/total，核实报告 §5）；第 5 项补上了
+// 失败清理 + got/total 校验 + res.on('error')，因此这两个用例现在是回归守门。
 test('截断响应：reject，且不残留半截文件（第 5 项已启用）', async (t) => {
   const dir = tmpDir(t)
   const base = await serve(t, (_req, res) => {

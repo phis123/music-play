@@ -7,6 +7,7 @@
   "scripts": {
     "start": "electron .",
     "lint:syntax": "node tools/lint-syntax.mjs",
+    "verify:assets": "node tools/verify-assets.mjs",
     "test": "node --test"
   },
   "keywords": ["music", "player", "lyrics", "lrc", "bilingual", "electron"],
