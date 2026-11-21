@@ -97,14 +97,67 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # build-apk.mjs 从 ANDROID_SDK_ROOT 找 build-tools/34.0.0 与 platforms/android-34
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK packages (build-tools 34.0.0 / platform 34)
+      # build-apk.mjs 从 ANDROID_SDK_ROOT 找 build-tools/34.0.0 与 platforms/android-34。
+      #
+      # 为什么不再用 android-actions/setup-android@v3：该 action 内部会执行
+      # `sdkmanager tools`，而 Google 已下线 legacy `tools` 包，于是日志出现
+      # `Warning: Failed to find package 'tools'` 并让整步 exit 1。这与我们自己的脚本
+      # 无关，属于 action 与当前 SDK 仓库不兼容（上游限制，修不动）。
+      # 因此这里自己装 cmdline-tools，再显式装 build-tools/platform，
+      # 全程不依赖 sdkmanager 已在 PATH。
+      - name: Setup Android SDK (cmdline-tools + platform 34 + build-tools 34.0.0)
         shell: pwsh
         run: |
-          sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
+          $ErrorActionPreference = 'Stop'
+
+          # SDK 根：优先环境变量里的（runner 镜像自带 C:\Android\android-sdk）
+          $sdk = $env:ANDROID_SDK_ROOT
+          if (-not $sdk) { $sdk = 'C:\Android\android-sdk' }
+          New-Item -ItemType Directory -Force -Path $sdk | Out-Null
+          Write-Host "SDK 根目录: $sdk"
+
+          # cmdline-tools 的版本号 11076708 就是 Google 仓库里 _latest.zip 文件名上的
+          # 构建号（同 https://developer.android.com/studio#command-line-tools-only 当前发布）。
+          # 若上游换了版本，只需改这一行的 URL 与注释里的版本号。
+          $cmdToolsVersion = '11076708'
+          $zipUrl = "https://dl.google.com/android/repository/commandlinetools-win-${cmdToolsVersion}_latest.zip"
+          $zip = Join-Path $env:RUNNER_TEMP 'cmdline-tools.zip'
+          Write-Host "下载 cmdline-tools: $zipUrl"
+          # 进度条在 CI 里既刷屏又拖慢下载，关掉
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri $zipUrl -OutFile $zip -UseBasicParsing
+
+          # zip 内层目录名固定是 cmdline-tools/，而 sdkmanager 要求最终落在
+          # <SDK>/cmdline-tools/latest（路径层级不对会报 "Could not determine SDK root"）
+          $unpack = Join-Path $env:RUNNER_TEMP 'cmdline-tools-unpack'
+          if (Test-Path $unpack) { Remove-Item -Recurse -Force $unpack }
+          Expand-Archive -Path $zip -DestinationPath $unpack -Force
+          $latest = Join-Path $sdk 'cmdline-tools/latest'
+          if (Test-Path $latest) { Remove-Item -Recurse -Force $latest }
+          New-Item -ItemType Directory -Force -Path (Split-Path $latest) | Out-Null
+          Move-Item -Path (Join-Path $unpack 'cmdline-tools') -Destination $latest
+          $sdkmanager = Join-Path $latest 'bin/sdkmanager.bat'
+          if (-not (Test-Path $sdkmanager)) { throw "cmdline-tools 解包异常，缺少 $sdkmanager" }
+
+          # 许可证：sdkmanager --licenses 从 stdin 逐条读 y。
+          # Windows runner 没有 yes 命令，用 pwsh 一次性喂 50 个 y（许可证条目远少于 50）。
+          # 输出重定向掉，避免 CI 日志被（未接受的）许可证清单刷屏。
+          $acceptAll = (1..50 | ForEach-Object { 'y' }) -join "`n"
+          $acceptAll | & $sdkmanager "--sdk_root=$sdk" --licenses 2>&1 | Out-Null
+
+          & $sdkmanager "--sdk_root=$sdk" --install "platforms;android-34" "build-tools;34.0.0"
+          if ($LASTEXITCODE -ne 0) { throw 'sdkmanager 安装 Android 34 组件失败' }
+
+          # 立刻自检，避免问题漂到后面的 Check toolchain 才炸
+          $aapt2 = Join-Path $sdk 'build-tools/34.0.0/aapt2.exe'
+          if (-not (Test-Path $aapt2)) { throw "安装后仍缺少 $aapt2" }
+
+          # 后续步骤（Check toolchain / tools/build-apk.mjs）靠这两个变量定位 SDK
+          "ANDROID_SDK_ROOT=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ANDROID_HOME=$sdk"     | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          # 顺手放进 PATH，方便人工在日志里跑 sdkmanager 排查
+          (Join-Path $latest 'bin') | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          Write-Host "Android SDK 就绪: $sdk"
 
       - name: Check toolchain (SDK / JDK / python)
         shell: pwsh
