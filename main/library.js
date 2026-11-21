@@ -34,7 +34,19 @@ const assertSafeWriteTarget = (filePath, opts = {}) => _assertSafeWrite(filePath
 
 const fileUrl = (p) => pathToFileURL(path.resolve(String(p))).href
 
-const AUDIO_EXT = new Set(['.mp3', '.flac', '.wav', '.ogg', '.m4a', '.aac', '.opus'])
+// 曲库扫描核心逻辑已下沉到 ./lib/library-scan.js（纯函数 + 注入 readdir），此处只保留
+// 常量来源与 fs 接线，保证 `library:scan` 对外行为不变。
+const {
+  DEFAULT_AUDIO_EXTS,
+  MAX_SCAN_DEPTH,
+  DEFAULT_SCAN_MAX_TRACKS,
+  collectAudioFiles,
+  applyTruncation,
+  mergeScanGen,
+  acceptScanCancel,
+  sortTracksByTitle,
+} = require('../lib/library-scan')
+const AUDIO_EXT = new Set(DEFAULT_AUDIO_EXTS)
 
 // ---------- 曲库扫描性能（P1-4）：有限并发 + 增量缓存 + 进度/取消 ----------
 // SCAN_CONCURRENCY = 4：music-metadata 的 parseFile 以磁盘 I/O + 标签解码为主，
@@ -42,7 +54,7 @@ const AUDIO_EXT = new Set(['.mp3', '.flac', '.wav', '.ogg', '.m4a', '.aac', '.op
 // 随机 I/O 与内存占用（每路各持一份解析缓冲），收益递减且可能拖慢前台播放。
 // 如需调优只改这一个常量。
 const SCAN_CONCURRENCY = 4
-const SCAN_MAX_TRACKS = 5000
+const SCAN_MAX_TRACKS = DEFAULT_SCAN_MAX_TRACKS
 const SCAN_CACHE_FILE = 'scan-cache.json'
 const SCAN_CACHE_VERSION = 2
 // 由渲染层“取消”按钮经 'library:scan-cancel' 置位；扫描在每批处理间隙检查。
@@ -179,20 +191,16 @@ function parseName(base) {
   return { title: s || base, artist: '' }
 }
 
-async function walk(dir, out, depth = 0, stats = { total: 0 }) {
-  if (depth > 8) return stats
-  let ents
-  try { ents = await fsp.readdir(dir, { withFileTypes: true }) } catch { return stats }
-  for (const e of ents) {
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) {
-      await walk(p, out, depth + 1, stats)
-    } else if (AUDIO_EXT.has(path.extname(e.name).toLowerCase())) {
-      stats.total++
-      if (out.length < SCAN_MAX_TRACKS) out.push(p)
-    }
-  }
-  return stats
+// 目录遍历的判定逻辑在 lib/library-scan.js，这里只把 fs 接进去：
+// readdir 用 fsp.readdir，路径拼接用 path.join，深度/上限/扩展名与原实现一致。
+function collectAudio(dir) {
+  return collectAudioFiles(dir, {
+    exts: AUDIO_EXT,
+    max: SCAN_MAX_TRACKS,
+    maxDepth: MAX_SCAN_DEPTH,
+    readdir: (d, opts) => fsp.readdir(d, opts),
+    join: (d, name) => path.join(d, name),
+  })
 }
 
 // ---------- 封面（带 LRU 容量上限缓存，按需取） ----------
@@ -248,12 +256,12 @@ async function handleScan(event, dir) {
   const sendProgress = (p) => {
     try { if (sender && !sender.isDestroyed()) sender.send('library:scan-progress', p) } catch { /* 渲染进程已关不影响扫描 */ }
   }
-  const files = []
-  const walkStats = await walk(target, files)
   // 遍历阶段只保留前 SCAN_MAX_TRACKS 个路径（控制超大目录内存占用），同时统计真实总数
-  const total = walkStats ? walkStats.total : files.length
-  const truncated = total > SCAN_MAX_TRACKS
-  const limited = files
+  const scanned = await collectAudio(target)
+  const { tracks: limited, truncated, total } = applyTruncation(scanned.paths, {
+    max: SCAN_MAX_TRACKS,
+    total: scanned.total,
+  })
   const lrcSets = await buildLrcSets([...new Set(limited.map((f) => path.dirname(f)))])
   const hasLrcFor = (f) => {
     const set = lrcSets.get(path.dirname(f))
@@ -313,17 +321,17 @@ async function handleScan(event, dir) {
     if (done - lastSent >= 10 || done === limited.length) emitProgress()
   }, () => scanCancelRequested)
   if (scanCancelRequested) emitProgress()
-  const stillCurrent = (myGen === scanGen)
+  const stillCurrent = mergeScanGen(scanGen, myGen)
   // 只保留本次扫描到的文件条目（已删除文件的旧缓存随之丢弃，避免缓存文件无界增长）；
   // 取消时只保存已处理部分的条目，未处理文件下次重新解析。
   if (stillCurrent) saveScanCache(newCache)
-  tracks.sort((a, b) => a.title.localeCompare(b.title, 'zh'))
+  sortTracksByTitle(tracks)
   return { root: target, tracks, total, truncated, cancelled: scanCancelRequested }
 }
 
 /** library:scan-cancel：只取消当前代际；不传则视为取消最新一次扫描 */
 function handleScanCancel(gen) {
-  if (gen == null || +gen === scanGen) scanCancelRequested = true
+  if (acceptScanCancel(gen, scanGen)) scanCancelRequested = true
 }
 
 // ---------- 歌词（本地侧车 .lrc / 内嵌） ----------
