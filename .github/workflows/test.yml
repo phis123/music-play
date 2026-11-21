@@ -42,9 +42,18 @@ jobs:
       # 语法守门：目标文件列表与 npm script 都在仓库里（tools/lint-syntax.mjs），
       # CI 只调用 npm script，本地与 CI 用同一套规则，避免 yaml 里再抄一份命令。
       # node --check 一次只收一个文件、且 Windows cmd 不展开通配符，所以脚本内部
-      # 自己展开 lib/*.js、renderer/js/*.js 等（用 process.execPath，与 setup-node 同版本）。
+      # 自己展开 lib/*.js、renderer/js/*.js、tools/*.mjs 等（用 process.execPath，
+      # 与 setup-node 同版本）。
       - name: Syntax gate (node --check)
         run: npm run lint:syntax
+
+      # 资产一致性守门：APK 的 WebView 用的是桌面端文件的**人工同步副本**
+      # （android/app/assets/js/random.js 必须与 lib/random.js 逐字节相同）。
+      # 这种漂移在单测里完全看不出来——桌面端改了、APK 里还是旧实现，
+      # 只有用户投诉才发现，所以必须单独守一道。
+      # 检查逻辑与本地完全相同：node tools/verify-assets.mjs（不一致 exit 1）。
+      - name: Assets consistency gate (sync copies + page references)
+        run: npm run verify:assets
 
       # 单测：node --test 会自动发现 test/*.test.js；每个测试文件独立子进程，
       # 因此 ensure-server 这类会打桩 net / 改 TEMP 的用例不会污染其他文件。
@@ -56,3 +65,106 @@ jobs:
       # 等于让守门员闭着一只眼。两个平台复用同一个 job 定义，避免两套 yaml 漂移。
       - name: Run unit tests (Node built-in test runner)
         run: npm test
+
+  # ---------------------------------------------------------------------------
+  # Android APK 构建守门（windows-latest）
+  #
+  # 为什么在 CI 里构建 APK：tools/build-apk.mjs 依赖 Windows 形态的工具链
+  # （aapt2.exe / d8.bat / javac.exe / apksigner.bat）与 python 打 zip，
+  # 以前只能在发行者本机跑，于是「assets 漏了文件 / 资源引用坏了」要等到发版
+  # 前手工打包才暴露。这里用 runner 自带的 Android SDK + setup-java 把它搬进 CI。
+  #
+  # 签名（不硬编码任何口令）：
+  #   - 配了仓库 secrets 时用正式密钥：APK_KEYSTORE（keystore 文件的 base64）、
+  #     APK_KS_PASS（store/key 口令）、APK_KS_ALIAS（密钥别名）；
+  #   - secrets 缺失时（fork PR / 未配置的仓库）自动退化为本次运行随机口令生成的
+  #     临时自签 keystore，只用于验证「能打出签名正确的包」，绝不入库、绝不打印。
+  # ---------------------------------------------------------------------------
+  apk:
+    name: apk (windows-latest)
+    runs-on: windows-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # tools/build-apk.mjs 用 $JAVA_HOME/bin/javac.exe 与 keytool（JDK 17）
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # build-apk.mjs 从 ANDROID_SDK_ROOT 找 build-tools/34.0.0 与 platforms/android-34
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages (build-tools 34.0.0 / platform 34)
+        shell: pwsh
+        run: |
+          sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Check toolchain (SDK / JDK / python)
+        shell: pwsh
+        run: |
+          if (-not $env:ANDROID_SDK_ROOT) { throw 'ANDROID_SDK_ROOT 未设置' }
+          $aapt2 = Join-Path $env:ANDROID_SDK_ROOT 'build-tools/34.0.0/aapt2.exe'
+          if (-not (Test-Path $aapt2)) { throw "缺少 $aapt2" }
+          & "$env:JAVA_HOME/bin/java.exe" -version
+          python --version
+
+      # 打包前再守一次资产一致性：APK 里的 assets 就是被打进去的那份副本。
+      - name: Assets consistency gate (before packaging)
+        shell: pwsh
+        run: node tools/verify-assets.mjs
+
+      - name: Prepare signing keystore (secrets → 临时自签兜底)
+        shell: pwsh
+        env:
+          APK_KEYSTORE_B64: ${{ secrets.APK_KEYSTORE }}
+          APK_KS_PASS_SECRET: ${{ secrets.APK_KS_PASS }}
+          APK_KS_ALIAS_SECRET: ${{ secrets.APK_KS_ALIAS }}
+        run: |
+          $ks = Join-Path $env:RUNNER_TEMP 'music-play.keystore'
+          if ($env:APK_KEYSTORE_B64) {
+            # secrets.APK_KEYSTORE 存的是 keystore 文件的 base64（二进制不能直接进 secret）
+            [IO.File]::WriteAllBytes($ks, [Convert]::FromBase64String($env:APK_KEYSTORE_B64))
+            $pass = $env:APK_KS_PASS_SECRET
+            $alias = $env:APK_KS_ALIAS_SECRET
+            if (-not $pass -or -not $alias) {
+              throw '已提供 APK_KEYSTORE，但缺少 APK_KS_PASS / APK_KS_ALIAS'
+            }
+            $mode = 'release (secrets)'
+          } else {
+            # 没有 secrets：随机口令生成一次性 debug keystore（口令不硬编码、不入库）
+            $pass = ([guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N'))
+            $alias = 'debug'
+            & "$env:JAVA_HOME/bin/keytool.exe" -genkeypair -keystore $ks -storepass $pass -keypass $pass `
+              -alias $alias -keyalg RSA -keysize 2048 -validity 10000 `
+              -dname "CN=music-play ci debug, O=music-play, C=CN"
+            if ($LASTEXITCODE -ne 0) { throw 'keytool 生成临时 debug keystore 失败' }
+            $mode = 'debug (临时自签，仅验证可打包)'
+          }
+          Write-Host "::add-mask::$pass"
+          "APK_KEYSTORE=$ks"   | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "APK_KS_PASS=$pass"  | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "APK_KS_ALIAS=$alias" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "签名方式: $mode"
+
+      # 版本号不写死：取 package.json 的 version（与 AndroidManifest 的 versionCode 各自独立）
+      - name: Build APK (tools/build-apk.mjs)
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          New-Item -ItemType Directory -Force -Path dist/apk | Out-Null
+          node tools/build-apk.mjs . "dist/apk/music-play-$version.apk"
+          if ($LASTEXITCODE -ne 0) { throw 'APK 构建失败' }
+          Get-ChildItem dist/apk | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: music-play-apk
+          path: dist/apk/*.apk
+          if-no-files-found: error
