@@ -26,6 +26,7 @@ const TARGETS = [
   'lib/*.js',
   'renderer/js/*.js',
   'android/app/assets/js/*.js',
+  'tools/*.mjs',
 ]
 
 function expand(target) {
