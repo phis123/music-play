@@ -23,11 +23,27 @@ const TARGETS = [
   'main.js',
   'preload.js',
   'netapi.js',
+  'main/*.js',
   'lib/*.js',
-  'renderer/js/*.js',
-  'android/app/assets/js/*.js',
+  'renderer/js/**/*.js',
+  'android/app/assets/js/**/*.js',
   'tools/*.mjs',
 ]
+
+// 递归收集 `dir/**/*.ext` 命中的文件（拆分后渲染层有了 core/library/player/views 子目录）
+function walkExt(dir, suffix, out) {
+  let names
+  try {
+    names = fs.readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const ent of names) {
+    const abs = path.join(dir, ent.name)
+    if (ent.isDirectory()) walkExt(abs, suffix, out)
+    else if (ent.isFile() && ent.name.endsWith(suffix)) out.push(abs)
+  }
+}
 
 function expand(target) {
   const star = target.indexOf('*')
@@ -35,19 +51,28 @@ function expand(target) {
     const abs = path.join(ROOT, target)
     return fs.existsSync(abs) ? [abs] : []
   }
-  // 只支持 `dir/*.ext` 这种单层通配（仓库里没有更深的层级）
-  const dir = path.join(ROOT, path.dirname(target))
+  const base = path.join(ROOT, path.dirname(target))
+  // `dir/**/*.ext`：递归（dirname 会把 '**' 当成目录名，必须先按 '/**/' 截断）
+  if (target.includes('/**/')) {
+    const cut = target.indexOf('/**/')
+    const rootDir = path.join(ROOT, target.slice(0, cut))
+    const suffix = target.slice(target.lastIndexOf('*') + 1) // 形如 ".js"
+    const out = []
+    walkExt(rootDir, suffix, out)
+    return out.sort()
+  }
+  // 只支持 `dir/*.ext` 这种单层通配
   const suffix = target.slice(star + 1) // 形如 ".js"
   let names
   try {
-    names = fs.readdirSync(dir)
+    names = fs.readdirSync(base)
   } catch {
     return []
   }
   return names
     .filter((name) => name.endsWith(suffix))
     .sort()
-    .map((name) => path.join(dir, name))
+    .map((name) => path.join(base, name))
 }
 
 const files = []
