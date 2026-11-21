@@ -3,13 +3,31 @@
 ## Android APK
 
 ```bash
+# 口令不在仓库里：先用 DPAPI 解密器注入环境变量，再构建
+source E:/dsh/work3/build/ks-pass.sh          # 注入 APK_KS_PASS / APK_KEYSTORE / APK_KS_ALIAS
+
 # versionName/versionCode 可省略：默认取 package.json，versionCode 由 semver 推导（1.0.7 -> 107）
-APK_KEYSTORE=/path/rel.jks APK_KS_PASS=*** APK_KS_ALIAS=musicplay \
-  node tools/build-apk.mjs . out/music-play-1.0.7.apk
+node tools/build-apk.mjs . out/music-play-1.0.7.apk
 
 # 显式指定版本时注意 versionCode 必须大于已安装版本，否则真机报 INSTALL_FAILED_VERSION_DOWNGRADE
 node tools/build-apk.mjs . out/x.apk 1.0.8 108
 ```
+
+### 签名口令的保管（口令不入库、不入脚本）
+
+口令以 **DPAPI 密文**保存在仓库之外的 `E:/dsh/work3/keys/ks-pass.dpapi`，密文与「当前 Windows 用户 + 本机」绑定，换用户或换机器后无法解密，需要重新录入：
+
+```bash
+pwsh -NoProfile -File E:/dsh/work3/build/ks-pass.ps1 -Action Set    # 首次 / 换机：交互录入（不回显）
+pwsh -NoProfile -File E:/dsh/work3/build/ks-pass.ps1 -Action Test   # 校验能否解密（不输出明文）
+pwsh -NoProfile -File E:/dsh/work3/build/ks-pass.ps1 -Action Info   # 看口令库位置
+```
+
+不想用 DPAPI 时，直接 `export APK_KS_PASS=...` 同样有效（已存在的环境变量优先，`ks-pass.sh` 会沿用）。
+
+`tools/build-apk.mjs` 与任何脚本都**不提供口令默认值**：缺 `APK_KS_PASS` 会立即报错退出（exit 2），不会静默降级成 debug 签名。CI 侧走仓库 secrets（`APK_KEYSTORE` 存 keystore 的 base64、`APK_KS_PASS`、`APK_KS_ALIAS`），未配置 secrets 时 apk job 会生成一次性随机口令的 debug keystore，仅用于验证「能打包」，产物不可用于发版。
+
+> 历史包袱：早期 `E:/dsh/work3/build/` 下的补丁脚本曾把口令写成明文兜底，已于 2026-11-21 清除。旧口令仍散落在若干旧会话日志与失败转储里，若在意暴露面应做一次密钥轮换（代价：老用户无法覆盖升级，需保留旧密钥双签过渡）。
 
 依赖（可用环境变量覆盖默认路径）：
 
