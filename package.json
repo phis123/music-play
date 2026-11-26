@@ -1,8 +1,11 @@
 {
   "name": "music-play",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "本地音乐播放器，专注双语歌词（原文一行 / 译文一行）",
   "private": true,
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "main": "main.js",
   "scripts": {
     "start": "electron .",

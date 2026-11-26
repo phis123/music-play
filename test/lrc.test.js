@@ -84,3 +84,16 @@ test('冒号/点号分隔的时间戳都接受', () => {
   assert.equal(parseLrc('[00:01.00]A')[0].t, 1000)
   assert.equal(parseLrc('[00:01:00]A')[0].t, 1000)
 })
+
+test('Android 同步副本 assets/js/lrc.js 与 lib/lrc.js 逐字节一致且已接线', () => {
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const root = path.resolve(__dirname, '..')
+  const src = fs.readFileSync(path.join(root, 'lib/lrc.js'))
+  const dst = fs.readFileSync(path.join(root, 'android/app/assets/js/lrc.js'))
+  assert.equal(Buffer.compare(src, dst), 0, 'lib/lrc.js 与 android/app/assets/js/lrc.js 必须逐字节一致')
+
+  const syncJs = fs.readFileSync(path.join(root, 'android/app/assets/js/player/lyrics-sync.js'), 'utf8')
+  assert.match(syncJs, /MusicPlayLrc\.parseLrc/, 'Android lyrics-sync.js 必须复用 MusicPlayLrc.parseLrc')
+  assert.doesNotMatch(syncJs, /Math\.abs\(last\.t - t\) < 0\.06/, '不得保留已漂移的 60ms 内联 LRC 解析')
+})

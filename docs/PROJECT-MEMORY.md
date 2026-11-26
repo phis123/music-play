@@ -1,6 +1,6 @@
 # music-play · 项目记忆 / 交接文档
 
-> 最后更新：2026-11-19 12:50（v1.0.10）
+> 最后更新：2026-11-26（v1.0.12）
 > 用途：新会话/新 Agent 接手时先读本文件；避免重复摸索与踩已知坑。
 
 ---
@@ -9,10 +9,10 @@
 
 | 项 | 值 |
 |---|---|
-| 仓库 | https://github.com/phis123/music-play （默认分支 `main`，v1.0.10 = `67d1ab5`） |
+| 仓库 | https://github.com/phis123/music-play （默认分支 `main`，当前版本 `v1.0.12`，线上最新 Release `v1.0.11`） |
 | 本地克隆 | `E:\dsh\work3\mp` |
 | 产物目录 | `E:\dsh\work3\out`（APK / Setup.exe / src.zip / 报告） |
-| 打包脚本 | `mp/tools/build-apk.mjs`、`mp/tools/music-play.iss`、`E:\dsh\work3\build\build-setup*.mjs`、`E:\dsh\work3\build\push-head.mjs`（API 推送兜底） |
+| 打包脚本 | `mp/tools/build-apk.mjs`、`mp/tools/music-play.iss`、`E:\dsh\work3\build\make-iss-*.py`、`E:\dsh\work3\build\ks-pass.{ps1,sh}`、`E:\dsh\work3\build\push-head.mjs` |
 | Windows 安装目录 | `E:\music-play`（内含用户曲库 `resources\*.mp3`，**打包时必须排除**） |
 | 平板（测试机） | 小米平板 6 Pro `23046RP50C`，Android 13，Magisk root，adb：`100.120.69.40:5555`（Tailscale，零弹窗） |
 | 手机（用户自己的） | 荣耀 WIN RT，Tailscale `100.98.137.42` |
@@ -20,21 +20,18 @@
 ### 关键环境变量（打包必填）
 
 ```bash
-export APK_KEYSTORE=E:/dsh/work3/keys/music-play-release.jks
-export APK_KS_PASS=<见本机密码记录，不入库>
-export APK_KS_ALIAS=musicplay
+source E:/dsh/work3/build/ks-pass.sh   # DPAPI 解密并注入 APK_KEYSTORE / APK_KS_PASS / APK_KS_ALIAS
 ```
-> 密钥与口令**绝不入库**；`.gitignore` 已忽略 `*.jks/*.keystore`。
+> 密钥与口令**绝不入库**；`.gitignore` 已忽略 `*.jks/*.keystore` 与 `.agent/`。
 
 ### 常用命令
 
 ```bash
 cd E:/dsh/work3/mp
-node --test                                   # 56 项单测
-export APK_KEYSTORE=... APK_KS_PASS=... APK_KS_ALIAS=musicplay
-node tools/build-apk.mjs . ../out/music-play-X.Y.Z.apk   # 版本自动取 package.json + Manifest
-node E:/dsh/work3/build/build-setup.mjs       # 打 Windows Setup（排除曲库）
-node E:/dsh/work3/build/push-head.mjs         # git push 被 reset 时用 API 推
+node --test                                   # 101 项单测（13 个文件）
+node tools/lint-syntax.mjs                    # 72/72 语法守门
+node tools/verify-assets.mjs                  # 2/2 同步副本 + 35 处引用校验
+node tools/build-apk.mjs . ../out/music-play-1.0.12.apk   # 自动取 package.json + Manifest，含 JDK17 自动回退
 ```
 
 ### 真机（平板）操作约束
@@ -46,25 +43,27 @@ node E:/dsh/work3/build/push-head.mjs         # git push 被 reset 时用 API �
 
 ---
 
-## 二、架构现状（v1.0.8）
+## 二、架构现状（v1.0.12）
 
 ### Android 原生
 ```
-PlaybackService.java   壳：MediaSession / 通知 / 音频焦点 / WakeLock / 回推网页
-PlayerEngine.java      ★ 唯一持有 MediaPlayer，专属 HandlerThread 串行执行
-Bridge.java            58 个 @JavascriptInterface（播放/曲库/歌词/悬浮词/诊断）
-AudioStore.java        MediaStore + 磁盘 + 内嵌 ID3 兜底；标签缓存原子写（纳秒 mtime）
-LyricsOverlay.java     悬浮词（全主线程 + 尊重 locked）
-Diag.java / DiagReceiver.java  诊断：会话日志、崩溃捕获、环境快照、zip 导出、广播触发
-MainActivity.java      WebView 宿主 + 权限申请 + dev 资源覆盖钩子（未验证可用）
+PlaybackService.java      壳：MediaSession / 通知 / 音频焦点 / WakeLock / 回推网页
+PlayerEngine.java         ★ 唯一持有 MediaPlayer，专属 HandlerThread 串行执行（PlayerBridge 已彻底清除）
+Bridge.java               薄门面，完整保持 64 个 @JavascriptInterface 契约
+BridgeStorage.java        曲库文件、路径边界校验、封面 LRU、私有歌词与存储权限
+BridgeNet.java            HTTP 请求与下载（对齐桌面端 200MB 上限与半截清理）
+Mp3LoudnessEstimator.java MP3 global_gain 响度采样与缓存
+AudioStore.java           MediaStore + 磁盘 + 内嵌 ID3 兜底；标签缓存原子写（纳秒 mtime）
+LyricsOverlay.java        悬浮词（全主线程 + 尊重 locked）
+Diag.java / DiagReceiver.java  诊断：会话日志、崩溃捕获、环境快照、zip 导出、DUMP 权限广播触发
+MainActivity.java         WebView 宿主 + 权限申请 + 规范路径校验的 dev 资源覆盖钩子
 ```
 
-### Android 前端（v1.0.9 已模块化）
-`assets/js/mobile.js` = **82 行入口**；模块在 `core/ library/ player/ views/` + `diag.js` + `native-callbacks.js` + `events.js`。
-零构建：`<script>` + `window.MP`（`MP.state` 即原 `S`，`MP.bus` 事件总线）。加载顺序 core→library→player(random.js 先于 queue.js)→views→回调→入口。
+### Android 前端（已模块化 + LRC 统一）
+`assets/js/mobile.js` = **81 行入口**；模块在 `core/ library/ player/ views/ events/(player,library,settings)` + `diag.js` + `native-callbacks.js` + `events.js` + `random.js`/`lrc.js`（与 `lib/` 逐字节同步）+ `neta.js`。页面已加严格 CSP；`mobile.css` 与桌面端统一 Studio Paper / Obsidian Vinyl 设计体系（兼容 Chromium 108 WebView）。
 
-### Electron 桌面（v1.0.9 起 Electron 45.2.1）
-`main.js`（约 840 行）+ `preload.js` + `renderer/js/app.js`（约 3900 行）。**阶段 4 待拆分**。Electron 45 打包必须整目录复制 dist（无 libEGL/libGLESv2）。
+### Electron 桌面（Electron 45.2.1）
+`main.js`（75 行薄入口）+ `main/` 5 模块（`ipc-registry`/`windows`/`library`/`net`/`diag`）+ `preload.js`（38 API）+ `renderer/js/app.js`（478 行）与 19 个 ESM 子模块。Electron 45 打包必须整目录复制 dist（无 libEGL/libGLESv2）。
 打包是**自建便携包**：`music-play.exe`（启动器）+ `music-play-core.exe`（改名 electron.exe）+ `resources/app`。
 
 ---
@@ -92,12 +91,10 @@ MainActivity.java      WebView 宿主 + 权限申请 + dev 资源覆盖钩子（
 | ✅ 已完成 v1.0.8 | 播放内核单线程化 + P0/P1/P2 修复 | APK/Setup 已发 |
 | ✅ 已完成 v1.0.9 | 前端模块化（28 模块）+ Electron 45.2.1 + CI 加固（68 单测） | APK/Setup 已发 |
 | ✅ 已完成 v1.0.10 | 修歌词自动跟随回归 + 胶囊定位 | APK/Setup 已发 |
-| P1 | 阶段 4：Electron 主进程/渲染层拆分 | `ipc-registry` 统一注册+校验 |
-| P2 | APK 构建进 CI | 需要容器内 aapt2/jdk |
-| P2 | 下载内容哈希校验 | 目前只有 Content-Length |
-| P2 | 下载内容哈希校验 | 目前只有 Content-Length |
-| P2 | 大曲库扫描单测 | 需先把扫描逻辑下沉到 `lib/library-scan.js` |
-| P2 | 沙箱冒烟 | 自动化一直在 `no-sandbox` 下跑（`DSH_SESSION_ID` 存在） |
+| ✅ 已完成 v1.0.11 | 阶段 4 Electron 拆分 + 扫描下沉单测 + APK 进 CI + DPAPI 口令治理 | 92 单测，APK/Setup 已发 |
+| ✅ 已完成 v1.0.12 | 安全加固（XSS/CSP/DUMP/下载上限）+ Bridge/events 模块化 + LRC 双端统一 + 双端 UI 美化 + `package-lock.json`/`npm ci` | 101 单测，桌面已实测，待真机验收 |
+| P2 | 下载内容哈希校验 | 目前只有 Content-Length 与大小上限 |
+| P2 | 沙箱冒烟 | 自动化在 `no-sandbox` 下跑（`DSH_SESSION_ID` / `ELECTRON_NO_SANDBOX`） |
 
 ---
 

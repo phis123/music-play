@@ -13,6 +13,7 @@ permissions:
 jobs:
   test:
     name: test (${{ matrix.os }})
+    timeout-minutes: 15
     strategy:
       # 一个平台红不要遮住另一个平台的结果，两个平台都要看到
       fail-fast: false
@@ -25,19 +26,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          # 注意：不能写 cache: 'npm'。仓库当前没有 package-lock.json，
-          # setup-node 的 npm 缓存需要 lockfile 才能算出 key，否则直接报错。
+          cache: 'npm'
 
-      # 为什么现在 npm install 而不是 `npm ci`：仓库还没有 lockfile
-      # （package-lock.json 未入库），`npm ci` 会直接失败。
-      # 先不引入 lockfile 的原因：这一版目标是把 CI 从「假绿」改成真守门员，
-      # 引入 lockfile 会把依赖树一次性冻结进仓库，属于独立的依赖治理变更
-      # （涉及 Electron 31→44 升级的 P1 任务）；在升级完成前加 lockfile 会让
-      # 每次版本调整都产生巨大 diff，也会把当前 unpinned 的传递依赖固化下来。
-      # 因此这里先按 semver 范围安装（--no-audit/--no-fund 只为减少 CI 噪音），
-      # 后续真正要可复现构建时，再单独提交 package-lock.json 并把这里换成 npm ci。
-      - name: Install dependencies (no lockfile yet → npm install)
-        run: npm install --no-audit --no-fund
+      # 已提交 package-lock.json，使用 npm ci 保证可复现构建与缓存命中。
+      - name: Install dependencies (npm ci)
+        run: npm ci --no-audit --no-fund
 
       # 语法守门：目标文件列表与 npm script 都在仓库里（tools/lint-syntax.mjs），
       # CI 只调用 npm script，本地与 CI 用同一套规则，避免 yaml 里再抄一份命令。
@@ -83,6 +76,7 @@ jobs:
   apk:
     name: apk (windows-latest)
     runs-on: windows-latest
+    timeout-minutes: 25
     needs: test
     steps:
       - uses: actions/checkout@v4
@@ -116,28 +110,32 @@ jobs:
           New-Item -ItemType Directory -Force -Path $sdk | Out-Null
           Write-Host "SDK 根目录: $sdk"
 
-          # cmdline-tools 的版本号 11076708 就是 Google 仓库里 _latest.zip 文件名上的
-          # 构建号（同 https://developer.android.com/studio#command-line-tools-only 当前发布）。
-          # 若上游换了版本，只需改这一行的 URL 与注释里的版本号。
-          $cmdToolsVersion = '11076708'
-          $zipUrl = "https://dl.google.com/android/repository/commandlinetools-win-${cmdToolsVersion}_latest.zip"
-          $zip = Join-Path $env:RUNNER_TEMP 'cmdline-tools.zip'
-          Write-Host "下载 cmdline-tools: $zipUrl"
-          # 进度条在 CI 里既刷屏又拖慢下载，关掉
-          $ProgressPreference = 'SilentlyContinue'
-          Invoke-WebRequest -Uri $zipUrl -OutFile $zip -UseBasicParsing
-
-          # zip 内层目录名固定是 cmdline-tools/，而 sdkmanager 要求最终落在
-          # <SDK>/cmdline-tools/latest（路径层级不对会报 "Could not determine SDK root"）
-          $unpack = Join-Path $env:RUNNER_TEMP 'cmdline-tools-unpack'
-          if (Test-Path $unpack) { Remove-Item -Recurse -Force $unpack }
-          Expand-Archive -Path $zip -DestinationPath $unpack -Force
           $latest = Join-Path $sdk 'cmdline-tools/latest'
-          if (Test-Path $latest) { Remove-Item -Recurse -Force $latest }
-          New-Item -ItemType Directory -Force -Path (Split-Path $latest) | Out-Null
-          Move-Item -Path (Join-Path $unpack 'cmdline-tools') -Destination $latest
           $sdkmanager = Join-Path $latest 'bin/sdkmanager.bat'
-          if (-not (Test-Path $sdkmanager)) { throw "cmdline-tools 解包异常，缺少 $sdkmanager" }
+          if (Test-Path $sdkmanager) {
+            Write-Host "已存在 cmdline-tools，跳过下载: $sdkmanager"
+          } else {
+            # cmdline-tools 的版本号 11076708 就是 Google 仓库里 _latest.zip 文件名上的
+            # 构建号（同 https://developer.android.com/studio#command-line-tools-only 当前发布）。
+            # 若上游换了版本，只需改这一行的 URL 与注释里的版本号。
+            $cmdToolsVersion = '11076708'
+            $zipUrl = "https://dl.google.com/android/repository/commandlinetools-win-${cmdToolsVersion}_latest.zip"
+            $zip = Join-Path $env:RUNNER_TEMP 'cmdline-tools.zip'
+            Write-Host "下载 cmdline-tools: $zipUrl"
+            # 进度条在 CI 里既刷屏又拖慢下载，关掉
+            $ProgressPreference = 'SilentlyContinue'
+            Invoke-WebRequest -Uri $zipUrl -OutFile $zip -UseBasicParsing
+
+            # zip 内层目录名固定是 cmdline-tools/，而 sdkmanager 要求最终落在
+            # <SDK>/cmdline-tools/latest（路径层级不对会报 "Could not determine SDK root"）
+            $unpack = Join-Path $env:RUNNER_TEMP 'cmdline-tools-unpack'
+            if (Test-Path $unpack) { Remove-Item -Recurse -Force $unpack }
+            Expand-Archive -Path $zip -DestinationPath $unpack -Force
+            if (Test-Path $latest) { Remove-Item -Recurse -Force $latest }
+            New-Item -ItemType Directory -Force -Path (Split-Path $latest) | Out-Null
+            Move-Item -Path (Join-Path $unpack 'cmdline-tools') -Destination $latest
+            if (-not (Test-Path $sdkmanager)) { throw "cmdline-tools 解包异常，缺少 $sdkmanager" }
+          }
 
           # 许可证：sdkmanager --licenses 从 stdin 逐条读 y。
           # Windows runner 没有 yes 命令，用 pwsh 一次性喂 50 个 y（许可证条目远少于 50）。

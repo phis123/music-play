@@ -6,6 +6,7 @@ const {
   extractMp3GlobalGainsFromBuffer,
   computeEffectiveGainDb,
 } = require('../lib/loudness')
+const { pickNextShuffleIndex } = require('../lib/random')
 
 test('parseReplayGainTag：支持数值、对象与带单位字符串解析并限幅在 [-15, 15]', () => {
   assert.equal(parseReplayGainTag(-4.26), -4.3)
@@ -41,49 +42,35 @@ test('extractMp3GlobalGainsFromBuffer：对空缓冲或非 MP3 数据安全返�
   assert.deepEqual(extractMp3GlobalGainsFromBuffer(Buffer.alloc(128, 0)), [])
 })
 
-test('随机播放三种策略验证：no-repeat 整轮不重复、rare-first 优先抽选少听曲目', () => {
+test('随机播放三种策略验证：通过 lib/random 真实实现校验 no-repeat 与 rare-first', () => {
   const queuePaths = ['a.mp3', 'b.mp3', 'c.mp3', 'd.mp3', 'e.mp3']
   const playCounts = { 'a.mp3': 20, 'b.mp3': 15, 'c.mp3': 12, 'd.mp3': 0, 'e.mp3': 1 }
   const shufflePlayed = new Set()
   let qPos = 0
 
-  function pickNext(strat) {
-    const n = queuePaths.length
-    if (strat === 'true-random') {
-      let idx = qPos
-      while (idx === qPos) idx = Math.floor(Math.random() * n)
-      return idx
-    }
-    shufflePlayed.add(queuePaths[qPos])
-    let unplayed = []
-    for (let i = 0; i < n; i++) {
-      if (i !== qPos && !shufflePlayed.has(queuePaths[i])) unplayed.push(i)
-    }
-    if (!unplayed.length) {
-      shufflePlayed.clear()
-      shufflePlayed.add(queuePaths[qPos])
-      for (let i = 0; i < n; i++) if (i !== qPos) unplayed.push(i)
-    }
-    if (strat === 'rare-first' && unplayed.length > 1) {
-      unplayed.sort((a, b) => (playCounts[queuePaths[a]] || 0) - (playCounts[queuePaths[b]] || 0))
-      const poolSize = Math.max(1, Math.ceil(unplayed.length * 0.35))
-      return unplayed[Math.floor(Math.random() * poolSize)]
-    }
-    return unplayed[Math.floor(Math.random() * unplayed.length)]
-  }
-
   // 1) no-repeat：连续切 4 次，连同初始曲目必须覆盖全部 5 首且无一重复
   const visited = new Set([queuePaths[qPos]])
   for (let step = 0; step < 4; step++) {
-    qPos = pickNext('no-repeat')
+    qPos = pickNextShuffleIndex({
+      queuePaths,
+      qPos,
+      strategy: 'no-repeat',
+      playedSet: shufflePlayed,
+    })
     visited.add(queuePaths[qPos])
   }
   assert.equal(visited.size, 5)
 
-  // 2) rare-first：重置后从 a.mp3 出发，前两次必抽中播放次数最少的 d.mp3 (0次) 和 e.mp3 (1次)
+  // 2) rare-first：重置后从 a.mp3 出发，前一次必抽中播放次数最少的 d.mp3 (0次) 或 e.mp3 (1次)
   shufflePlayed.clear()
   qPos = 0
-  const firstRare = queuePaths[pickNext('rare-first')]
+  const firstRare = queuePaths[pickNextShuffleIndex({
+    queuePaths,
+    qPos,
+    strategy: 'rare-first',
+    playedSet: shufflePlayed,
+    playCountOf: (p) => playCounts[p] || 0,
+  })]
   assert.ok(firstRare === 'd.mp3' || firstRare === 'e.mp3', `expected d.mp3 or e.mp3, got ${firstRare}`)
 })
 

@@ -27,6 +27,11 @@ export const SYNC_PAIRS = [
     dst: 'android/app/assets/js/random.js',
     why: '随机播放三策略桌面端 / Android 共用同一份 UMD 实现（assets 侧是同步副本）',
   },
+  {
+    src: 'lib/lrc.js',
+    dst: 'android/app/assets/js/lrc.js',
+    why: 'LRC 解析桌面端 / Android 共用同一份 UMD 实现（多时间戳展开 + ±30ms 双语配对一致）',
+  },
 ]
 
 /** 需要校验本地引用（src/href）都存在的 assets 页面 */
@@ -57,8 +62,8 @@ export function firstDiff(a, b) {
     return line
   }
   const lineText = (buf, at) => {
-    // 取差异处所在行的可读文本（可能截断在行中，这里从行首取到行尾）
-    let start = Math.max(0, at - 1)
+    // 取差异处所在行的可读文本（从当前行首取到行尾）
+    let start = Math.min(at, buf.length)
     while (start > 0 && buf[start - 1] !== 0x0a) start--
     let end = Math.min(buf.length, at)
     while (end < buf.length && buf[end] !== 0x0a) end++
@@ -212,9 +217,14 @@ if (isMain()) {
         }
       }
     }
+    const okPairs = result.pairs.results.filter((r) => r.ok).length
+    const okRefs = result.pages.results.filter((r) => r.ok).length
+    const missingRefs = result.stats.refs - okRefs
+    const refMsg = missingRefs === 0 && result.pages.ok
+      ? `页面引用 ${result.stats.refs} 处全部存在`
+      : `页面引用 ${okRefs}/${result.stats.refs} 处存在（缺 ${missingRefs} 处）`
     console.log(
-      `\n[verify-assets] 同步副本 ${result.pairs.results.filter((r) => r.ok).length}/${result.stats.pairs} 逐字节一致，` +
-        `页面引用 ${result.stats.refs} 处全部存在`,
+      `\n[verify-assets] 同步副本 ${okPairs}/${result.stats.pairs} 逐字节一致，${refMsg}`,
     )
     if (!result.ok) {
       console.error(`[verify-assets] ${result.problems.length} 个问题：`)

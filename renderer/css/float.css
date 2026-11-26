@@ -1,3 +1,4 @@
+/* music-play 桌面悬浮歌词 — 精致玻璃胶囊与高对比描边 */
 * { box-sizing: border-box; margin: 0; }
 
 :root {
@@ -10,7 +11,8 @@ html, body {
   height: 100%;
   background: transparent;
   overflow: hidden;
-  font-family: "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  font-family: "Segoe UI Variable Text", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
   user-select: none;
 }
 
@@ -20,22 +22,24 @@ html, body {
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  padding: 4px 14px 6px;
-  -webkit-app-region: no-drag;   /* 整块可拖会吞掉鼠标事件，改为局部拖动 */
+  padding: 6px 16px 8px;
+  -webkit-app-region: no-drag;
 }
 
-/* ---------- 拖动条（左上角） ---------- */
+/* ---------- 拖动胶囊（左上角，悬停浮现） ---------- */
 .drag {
   position: absolute;
-  top: 2px;
-  left: 8px;
-  width: 46px;
-  height: 20px;
-  border-radius: 6px;
-  background: rgba(28, 28, 34, .55);
+  top: 4px;
+  left: 10px;
+  width: 52px;
+  height: 22px;
+  border-radius: 999px;
+  background: rgba(20, 20, 28, .66);
+  border: 1px solid rgba(255, 255, 255, .14);
+  backdrop-filter: blur(12px);
   -webkit-app-region: drag;
   opacity: 0;
-  transition: opacity .18s;
+  transition: opacity .18s ease;
 }
 #wrap:hover .drag { opacity: 1; }
 .drag::after {
@@ -45,7 +49,8 @@ html, body {
   display: grid;
   place-items: center;
   font-size: 10px;
-  color: rgba(255, 255, 255, .75);
+  font-weight: 600;
+  color: rgba(255, 255, 255, .86);
 }
 
 /* ---------- 顶部：曲名 / 作者 ---------- */
@@ -54,114 +59,135 @@ html, body {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin-bottom: 2px;
+  margin-bottom: 3px;
 }
-
 #title {
-  font-size: 12.5px;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--ly-color);
-  opacity: .72;
-  text-shadow: 0 1px 6px rgba(0, 0, 0, .9), 0 0 2px rgba(0, 0, 0, .8);
-  max-width: 78%;
+  opacity: .76;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, .92), 0 0 2px rgba(0, 0, 0, .86);
+  max-width: 76%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 #title:empty { display: none; }
 
-/* ---------- 歌词（无底色） ---------- */
+/* ---------- 双语歌词区 ---------- */
 #lines {
-  -webkit-app-region: drag;      /* 按住歌词可拖动窗口 */
+  -webkit-app-region: drag;
   text-align: center;
-  transform: translateZ(0);   /* 独立合成层，减少重绘抖动 */
+  transform: translateZ(0);
   backface-visibility: hidden;
   background: var(--ly-bg, transparent);
-  border-radius: 12px;
-  padding: 4px 12px;
+  border-radius: 14px;
+  padding: 5px 14px;
 }
 
 #en {
   font-size: calc(var(--ly-size) * .68);
-  line-height: 1.4;
+  line-height: 1.42;
+  letter-spacing: .01em;
   color: var(--ly-color);
-  opacity: .74;
-  text-shadow: 0 1px 6px rgba(0, 0, 0, .9), 0 0 2px rgba(0, 0, 0, .8);
+  opacity: .80;
+  text-shadow:
+    0 1px 7px rgba(0, 0, 0, .94),
+    0 0 2.5px rgba(0, 0, 0, .90);
 }
-#en:empty { display: none; }
-
-#zh:empty { display: none; }
+#en:empty, #zh:empty { display: none; }
 
 #zh {
   font-size: var(--ly-size);
   line-height: 1.42;
-  font-weight: 700;
+  font-weight: 750;
   color: var(--ly-color);
-  text-shadow: 0 2px 10px rgba(0, 0, 0, .92), 0 0 3px rgba(0, 0, 0, .85);
+  text-shadow:
+    0 2px 12px rgba(0, 0, 0, .95),
+    0 0 3px rgba(0, 0, 0, .92);
 }
 
-/* ---------- 控制条 ---------- */
+/* ---------- 右上角控制胶囊 ---------- */
 .ctrl {
   position: absolute;
-  top: 2px;
+  top: 4px;
   right: 10px;
   display: flex;
-  gap: 3px;
-  opacity: .82;                 /* 常驻显示，鼠标移近变亮 */
-  transition: opacity .18s;
+  gap: 4px;
+  padding: 2px 4px;
+  border-radius: 999px;
+  background: rgba(20, 20, 28, .66);
+  border: 1px solid rgba(255, 255, 255, .12);
+  backdrop-filter: blur(12px);
+  opacity: .78;
+  transition: opacity .18s ease;
   -webkit-app-region: no-drag;
 }
 .ctrl:hover { opacity: 1; }
 
 .ctrl button, #panel button {
   border: none;
-  border-radius: 6px;
-  background: rgba(28, 28, 34, .72);
-  color: #fff;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, .92);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 11.5px;
+  transition: background .15s, color .15s;
 }
 .ctrl button { width: 26px; height: 22px; }
-.ctrl button:hover, #panel button:hover { background: rgba(236, 65, 65, .9); }
+.ctrl button:hover { background: rgba(229, 57, 69, .92); color: #fff; }
 
-/* ---------- 设置面板 ---------- */
+/* ---------- 样式浮层面板 ---------- */
 #panel {
   position: absolute;
-  right: 8px;
-  top: 30px;      /* 放在右上角，避免遮挡歌词 */
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: rgba(24, 24, 30, .92);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, .4);
+  right: 10px;
+  top: 34px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(20, 20, 28, .92);
+  border: 1px solid rgba(255, 255, 255, .12);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .48);
   display: grid;
-  gap: 7px;
+  gap: 8px;
   -webkit-app-region: no-drag;
 }
 #panel.hidden { display: none; }
 .row { display: flex; align-items: center; gap: 8px; }
-.lbl { font-size: 11.5px; color: rgba(255, 255, 255, .6); width: 28px; }
+.lbl { font-size: 11.5px; color: rgba(255, 255, 255, .64); width: 28px; }
 
-.swatches { display: flex; gap: 5px; }
+.swatches { display: flex; gap: 6px; }
 .sw {
-  width: 16px; height: 16px;
+  width: 17px;
+  height: 17px;
   border-radius: 50%;
   background: var(--c);
-  border: 1.5px solid rgba(255, 255, 255, .28);
+  border: 1.5px solid rgba(255, 255, 255, .32);
   cursor: pointer;
+  transition: transform .14s;
 }
-.sw.on { border-color: #ec4141; box-shadow: 0 0 0 2px rgba(236, 65, 65, .35); }
+.sw:hover { transform: scale(1.12); }
+.sw.on { border-color: #ff5460; box-shadow: 0 0 0 2px rgba(255, 84, 96, .42); }
 
-#panel button { width: 30px; height: 24px; }
-#szVal { font-size: 12px; color: #fff; width: 22px; text-align: center; }
+#panel button {
+  width: 32px;
+  height: 24px;
+  background: rgba(255, 255, 255, .10);
+  border-radius: 7px;
+}
+#panel button:hover { background: #e53945; }
+#szVal { font-size: 12px; font-weight: 700; color: #fff; width: 24px; text-align: center; font-variant-numeric: tabular-nums; }
 
-/* ---------- 锁定态 ---------- */
+/* ---------- 锁定提示与穿透态 ---------- */
 #hint {
   position: absolute;
-  bottom: 2px;
+  bottom: 4px;
   left: 50%;
   transform: translateX(-50%);
-  padding: 3px 12px;
+  padding: 4px 14px;
   border-radius: 999px;
-  background: rgba(16, 16, 22, .78);
+  background: rgba(16, 16, 24, .84);
+  border: 1px solid rgba(255, 255, 255, .12);
   font-size: 11.5px;
   color: #fff;
   opacity: 0;
@@ -172,8 +198,6 @@ html, body {
 #hint.show { opacity: 1; }
 body.locked .ctrl,
 body.locked #panel { display: none; }
-
-/* 锁定后必须取消拖动区，否则仍能拖动窗口 */
 body.locked #lines,
 body.locked .drag { -webkit-app-region: no-drag; }
 body.locked .drag { display: none !important; }

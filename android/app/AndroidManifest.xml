@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.phis.musicplay"
-    android:versionCode="111"
-    android:versionName="1.0.11">
+    android:versionCode="112"
+    android:versionName="1.0.12">
 
     <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
 
@@ -39,7 +39,8 @@
         </activity>
         <receiver
             android:name=".DiagReceiver"
-            android:exported="true">
+            android:exported="true"
+            android:permission="android.permission.DUMP">
             <intent-filter>
                 <action android:name="com.phis.musicplay.DIAG_EXPORT" />
                 <action android:name="com.phis.musicplay.DIAG_CLEAR" />

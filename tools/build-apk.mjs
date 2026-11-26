@@ -42,7 +42,18 @@ if (!process.argv[5]) console.log('版本: ' + versionName + ' / code ' + versio
 const SDK = process.env.ANDROID_SDK_ROOT || 'E:/android-toolchain/android-sdk'
 const BT = path.join(SDK, 'build-tools/34.0.0')
 const ANDROID_JAR = path.join(SDK, 'platforms/android-34/android.jar')
-const JAVA_HOME = process.env.JAVA_HOME || 'E:/android-toolchain/jdk/jdk-17.0.20.1+1'
+const DEFAULT_JDK17 = 'E:/android-toolchain/jdk/jdk-17.0.20.1+1'
+const JAVA_HOME = (() => {
+  if (process.env.APK_JAVA_HOME) return process.env.APK_JAVA_HOME
+  const envJava = process.env.JAVA_HOME || ''
+  // build-tools 34.0.0 的 d8 (R8 8.2.2) 在 JDK 21 编译匿名内部类时可能触发 NPE；
+  // 若检测到本地存在 JDK 17 且环境变量指向 JDK 21+，自动回退到 JDK 17。
+  if (envJava && /jdk[-_]?2\d/i.test(envJava) && fs.existsSync(path.join(DEFAULT_JDK17, 'bin/javac.exe'))) {
+    console.warn(`⚠ 检测到 JAVA_HOME=${envJava}（JDK 21+ 与 d8 8.2.2 存在兼容问题），自动改用 ${DEFAULT_JDK17}`)
+    return DEFAULT_JDK17
+  }
+  return envJava || DEFAULT_JDK17
+})()
 const PYTHON = process.env.PYTHON || 'python'
 const KEYSTORE = process.env.APK_KEYSTORE || ''
 const KS_PASS = process.env.APK_KS_PASS || ''

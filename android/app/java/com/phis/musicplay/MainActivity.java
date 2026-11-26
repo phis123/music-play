@@ -18,7 +18,6 @@ public class MainActivity extends Activity {
 
     private WebView web;
     public WebView webView;
-    private PlayerBridge player;
     public static MainActivity current;
 
     @Override
@@ -100,7 +99,9 @@ public class MainActivity extends Activity {
                     if (q >= 0) rel = rel.substring(0, q);
                     java.io.File devDir = new java.io.File(getExternalFilesDir(null), "dev");
                     java.io.File f = new java.io.File(devDir, rel);
-                    if (!f.isFile()) return null;
+                    String devCanon = devDir.getCanonicalPath();
+                    String fileCanon = f.getCanonicalPath();
+                    if (!fileCanon.startsWith(devCanon + java.io.File.separator) || !f.isFile()) return null;
                     String mime = "text/plain";
                     if (rel.endsWith(".js")) mime = "application/javascript";
                     else if (rel.endsWith(".css")) mime = "text/css";
@@ -117,8 +118,7 @@ public class MainActivity extends Activity {
         });
         web.setBackgroundColor(0xFFFFFFFF);
 
-        player = new PlayerBridge(this, web);
-        web.addJavascriptInterface(new Bridge(this, web, player), "Android");
+        web.addJavascriptInterface(new Bridge(this, web), "Android");
 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(0xFFFFFFFF);
@@ -196,7 +196,6 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         try { Diag.writeLifecycle(this, "onDestroy"); } catch (Throwable ignored) { }
         current = null;
-        if (player != null) player.release();
         if (web != null) web.destroy();
         super.onDestroy();
     }

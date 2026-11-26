@@ -19,7 +19,7 @@ function applyTheme(mode) {
   const eff = resolveTheme(S.theme);
   document.documentElement.dataset.theme = eff;
   const meta = document.getElementById('metaThemeColor');
-  if (meta) meta.setAttribute('content', eff === 'dark' ? '#111115' : '#ffffff');
+  if (meta) meta.setAttribute('content', eff === 'dark' ? '#0e0e12' : '#fafafa');
   const lbl = document.getElementById('railThemeLabel');
   if (lbl) {
     lbl.textContent = '外观：' + (S.theme === 'dark' ? '深色' : S.theme === 'light' ? '浅色' : '跟随系统');

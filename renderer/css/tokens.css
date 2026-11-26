@@ -1,75 +1,98 @@
+/* music-play Design Tokens — Studio Paper (Light) & Obsidian Vinyl (Dark) */
 :root {
-  /* 品牌 */
-  --red: #ec4141;
-  --red-hover: #f45c5c;
-  --red-soft: #fdeaea;
+  /* 品牌主色：克制的绛红珊瑚，兼顾高对比与质感 */
+  --red: #e53945;
+  --red-hover: #f04854;
+  --red-soft: rgba(229, 57, 69, 0.10);
+  --red-ring: rgba(229, 57, 69, 0.24);
+  --green: #1d9a6c;
+  --green-soft: rgba(29, 154, 108, 0.12);
 
-  /* 背景层次（浅色主基调） */
-  --bg: #ffffff;
-  --side: #f7f7f9;
+  /* 背景层次（温润纸感浅色） */
+  --bg: #fafafa;
+  --side: #f3f3f6;
   --panel: #ffffff;
-  --hover: #f2f2f5;
-  --active: #fdeaea;
+  --panel-glass: rgba(255, 255, 255, 0.84);
+  --hover: rgba(20, 20, 32, 0.045);
+  --active: rgba(229, 57, 69, 0.10);
 
-  /* 线条 */
-  --line: #e6e6ea;
-  --line-soft: #eeeef1;
+  /* 发丝分隔线 */
+  --line: rgba(20, 20, 32, 0.095);
+  --line-soft: rgba(20, 20, 32, 0.055);
+  --rim: rgba(20, 20, 32, 0.08);
 
-  /* 文字 */
-  --text: #1a1a1c;
-  --text-2: #3c3c42;
-  --dim: #8a8a92;
-  --dim-2: #a6a6ae;
+  /* 文本阶梯 */
+  --text: #141418;
+  --text-2: #42424d;
+  --dim: #797987;
+  --dim-2: #a0a0ae;
 
   /* 封面占位 */
-  --cover-a: #ececf1;
-  --cover-b: #dcdce4;
+  --cover-a: #ececf2;
+  --cover-b: #dcdce6;
 
-  /* 歌词 */
-  --ly-en: #6b7280;
-  --ly-zh: #1f2328;
-  --ly-en-cur: #111114;
-  --ly-zh-cur: #111114;
+  /* 双语歌词层级 */
+  --ly-en: rgba(66, 66, 77, 0.56);
+  --ly-zh: rgba(20, 20, 24, 0.72);
+  --ly-en-cur: #141418;
+  --ly-zh-cur: #141418;
 
-  /* 尺寸 */
+  /* 阴影与光晕 */
+  --shadow-sm: 0 2px 8px rgba(16, 16, 28, 0.06);
+  --shadow-md: 0 10px 30px rgba(16, 16, 28, 0.10);
+  --shadow-lg: 0 24px 64px rgba(14, 14, 24, 0.18);
+
+  /* 布局尺寸与动效 */
   --titlebar-h: 38px;
-  --sidebar-w: 240px;
-  --player-h: 72px;
-  --ambient-rgb: 236, 65, 65;
+  --sidebar-w: 236px;
+  --player-h: 76px;
+  --ambient-rgb: 229, 57, 69;
 
-  --r-sm: 6px;
-  --r-md: 8px;
-  --r-lg: 12px;
+  --r-sm: 7px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 18px;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 
   color-scheme: light;
 }
 
 [data-theme="dark"] {
-  --red: #ff5252;
-  --red-hover: #ff6b6b;
-  --red-soft: rgba(255, 82, 82, 0.16);
+  --red: #ff5460;
+  --red-hover: #ff6e78;
+  --red-soft: rgba(255, 84, 96, 0.15);
+  --red-ring: rgba(255, 84, 96, 0.30);
+  --green: #34d399;
+  --green-soft: rgba(52, 211, 153, 0.14);
 
-  --bg: #111116;
-  --side: #181820;
-  --panel: #1a1a23;
-  --hover: #242430;
-  --active: rgba(255, 82, 82, 0.16);
+  /* 黑胶墨色深层 */
+  --bg: #0e0e12;
+  --side: #14141a;
+  --panel: #191922;
+  --panel-glass: rgba(22, 22, 30, 0.84);
+  --hover: rgba(255, 255, 255, 0.06);
+  --active: rgba(255, 84, 96, 0.15);
 
-  --line: #2a2a38;
-  --line-soft: #22222e;
+  --line: rgba(255, 255, 255, 0.095);
+  --line-soft: rgba(255, 255, 255, 0.055);
+  --rim: rgba(255, 255, 255, 0.09);
 
-  --text: #f3f3f8;
-  --text-2: #c6c6d4;
-  --dim: #8b8b9c;
-  --dim-2: #646475;
+  --text: #f4f4f8;
+  --text-2: #c5c6d4;
+  --dim: #888a9c;
+  --dim-2: #606273;
 
-  --cover-a: #262633;
-  --cover-b: #1c1c26;
+  --cover-a: #242430;
+  --cover-b: #191922;
 
-  --ly-en: #9498a6;
-  --ly-zh: #cfd2dc;
-  --ly-en-cur: #ff5252;
-  --ly-zh-cur: #ffffff;
+  --ly-en: rgba(210, 212, 228, 0.50);
+  --ly-zh: rgba(235, 236, 246, 0.72);
+  --ly-en-cur: #ffffff;
+  --ly-zh-cur: rgba(255, 255, 255, 0.92);
+
+  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.28);
+  --shadow-md: 0 12px 32px rgba(0, 0, 0, 0.42);
+  --shadow-lg: 0 28px 72px rgba(0, 0, 0, 0.62);
 
   color-scheme: dark;
 }

@@ -37,6 +37,9 @@ desktop.ini
 .idea/
 *.swp
 
+# ---- 本地代理/调度记忆 ----
+.agent/
+
 # ---- 调试留痕 ----
 _*.txt
 _*.log

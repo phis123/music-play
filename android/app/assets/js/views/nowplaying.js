@@ -34,7 +34,7 @@ function viewVoices() {
   const head = v.song
     ? `<div class="section" style="margin-top:4px">
          <div class="section-title">${esc(v.song.name)}</div>
-         <div class="section-more">${v.song.artist || ''}</div>
+         <div class="section-more">${esc(v.song.artist || '')}</div>
        </div>`
     : '';
   const body = v.loading

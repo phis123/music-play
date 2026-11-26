@@ -71,19 +71,13 @@ function loadLyrics(t) {
 }
 
 function parseLrc(txt) {
-  const out = [];
-  String(txt).split(/\r?\n/).forEach((line) => {
-    const m = line.match(/^\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]\s*(.*)$/);
-    if (!m) return;
-    const t = +m[1] * 60 + +m[2] + (m[3] ? +m[3].padEnd(2, '0').slice(0, 2) / 100 : 0);
-    const body = m[4].trim();
-    if (!body) return;
-    const last = out[out.length - 1];
-    // 同时间戳相邻两行 → 原文 + 译文
-    if (last && Math.abs(last.t - t) < 0.06 && !last.tr) { last.tr = body; return; }
-    out.push({ t, text: body, tr: '' });
-  });
-  return out;
+  const shared = window.MusicPlayLrc && window.MusicPlayLrc.parseLrc;
+  if (typeof shared !== 'function') return [];
+  return shared(txt).map((r) => ({
+    t: r.t / 1000,
+    text: r.pair ? r.pair[0] : r.text,
+    tr: r.pair ? r.pair.slice(1).join(' / ') : '',
+  }));
 }
 
 function renderLyrics() {

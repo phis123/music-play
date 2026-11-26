@@ -1,11 +1,11 @@
 # 交接文档（HANDOVER）
 
-> 写于 2026-11-26 ｜ 对应代码 `main @ ab91c70` ｜ 线上版本 `v1.0.11`
-> 项目状态与调度内核见 `.agent/STATE.md`；人读记忆见 `docs/PROJECT-MEMORY.md`。本文面向「接手这个人」，把他需要知道的一切按上手顺序排好。
+> 写于 2026-11-26 ｜ 当前开发版本 `v1.0.12`（`versionCode 112`）｜ 线上最新 Release `v1.0.11`
+> 项目状态与调度内核见 `.agent/STATE.md`（本地忽略不入库）；人读记忆见 `docs/PROJECT-MEMORY.md`。本文面向「接手这个人」，把他需要知道的一切按上手顺序排好。
 
 ## 1. 一句话现状
 
-私人双端本地音乐播放器，Android（原生 Java + WebView 前端）与 Windows 桌面（Electron 45）共用一套前端逻辑；**v1.0.11 已于 2026-11-21 发布并在本机双端装好，所有质量门全绿，无进行中的开发任务**。仓库干净、远端同步、CI 通过。剩下的只有可选的收口项（见第 10 节）。
+私人双端本地音乐播放器，Android（原生 Java + WebView 前端）与 Windows 桌面（Electron 45）共用一套前端思路；**v1.0.12 已完成安全加固、Android 原生与事件层模块化、LRC 解析双端统一、桌面与移动端 UI 视觉全面升级、锁文件与 CI 提速，全部 101 项单测 / 72 项语法 / 2 对资产守门全绿，桌面端已在本机 Electron 45 实测通过，正式签名 APK 与 Setup 已出包，待平板与手机真机验收**。
 
 ## 2. 项目是什么
 
@@ -21,14 +21,13 @@
 
 | 项 | 值 |
 | --- | --- |
-| 版本 | `1.0.11`（`package.json` / `AndroidManifest` versionCode **111** / `PlaybackService.buildTagText = "2026-11-21.16:25-v1.0.11"`） |
-| Git | `main @ ab91c70`，`origin/main` 同步，tag `v1.0.11`（附注标签） |
-| GitHub release | `releases/tag/v1.0.11`，id `453554154`，2026-11-21T08:40Z 公开 |
-| 资产 | `music-play-1.0.11.apk` 261089B ／ `music-play-Setup-1.0.11.exe` 133181364B ／ `music-play-src-1.0.11.zip` 547151B |
-| 签名 | keystore `E:/dsh/work3/keys/music-play-release.jks`，alias `musicplay`，证书 SHA-256 以 `46165aa1…75a959` 结尾，**与 1.0.9/1.0.10 同一把** |
-| 本机状态 | 桌面 `E:/music-play` = 1.0.11；平板已装 versionCode 111（写文档时无线 adb 未连接，需重连） |
+| 版本 | `1.0.12`（`package.json` / `AndroidManifest` versionCode **112** / `PlaybackService.buildTagText = "2026-11-26.19:05-v1.0.12"`） |
+| Git | `main`（已同步远端）；线上最新 Release 仍为 `v1.0.11`（`ab91c70`，待真机验收后发 `v1.0.12`） |
+| 本地产物 | `E:/dsh/work3/out/music-play-1.0.12.apk`（正式签名，SHA-256 `46165aa1…75a959`）与 `music-play-Setup-1.0.12.exe` |
+| 签名 | keystore `E:/dsh/work3/keys/music-play-release.jks`，alias `musicplay`，证书 SHA-256 以 `46165aa1…75a959` 结尾，**与 1.0.9~1.0.11 同一把** |
+| 本机状态 | 桌面 Electron 45 便携运行时已同步 1.0.12 并实测通过（738 首、0 报错）；平板与手机真机待用户安装 1.0.12 APK 验收 |
 
-v1.0.11 是**纯内部重构版，行为零变化**，升级说明见 `E:/dsh/work3/out/release-notes-1.0.11.md`。
+v1.0.12 包含**安全加固、模块化重构、双端 LRC 统一、Studio Paper / Obsidian Vinyl 双端 UI 重构与 CI/锁文件治理**。
 
 ## 4. 代码结构现状（真实行数）
 
@@ -50,13 +49,14 @@ renderer/js/
   player/             audio queue lyrics（3 个）
   views/              lists settings sheet router（4 个）
   float.js                      悬浮歌词窗入口
-android/app/assets/js/         已模块化：core/ library/ player/ views/ + diag/events/native-callbacks + mobile.js(82 行)
+android/app/assets/js/         已模块化：core/ library/ player/ views/ events/(player,library,settings) + diag/events/native-callbacks + lrc.js + random.js + mobile.js(81 行)
 android/app/java/com/phis/musicplay/
-                              PlayerEngine PlaybackService Bridge(64 @JavascriptInterface) AudioStore
-                              LyricsOverlay Diag DiagReceiver MainActivity PlayerBridge(dead code)
-tools/                        build-apk.mjs / lint-syntax.mjs / verify-assets.mjs / music-play.iss
-test/                         11 个文件 / 92 用例
-docs/                         PROJECT-MEMORY / BUFFER 见第 11 节
+                              PlayerEngine PlaybackService Bridge(薄门面,64 @JavascriptInterface)
+                              BridgeStorage BridgeNet(200MB下载上限) Mp3LoudnessEstimator
+                              AudioStore LyricsOverlay Diag DiagReceiver(DUMP权限) MainActivity
+tools/                        build-apk.mjs(含JDK17自动回退) / lint-syntax.mjs / verify-assets.mjs / music-play.iss
+test/                         13 个文件 / 101 用例
+docs/                         共 10 个文档（见第 11 节）
 ```
 
 **注意路径形态**：Manifest 是 `android/app/AndroidManifest.xml`，Java 在 `android/app/java/...`，**没有 `src/main/` 这一层**。网上文档或旧脚本若按标准 Gradle 布局写路径，会全部找不到文件。
@@ -100,12 +100,12 @@ docs/                         PROJECT-MEMORY / BUFFER 见第 11 节
 
 ```bash
 cd E:/dsh/work3/mp
-node --test                        # 92 pass / 0 fail（11 个测试文件）
-node tools/lint-syntax.mjs         # 68/68（递归覆盖 main/、renderer 子目录、android assets 子目录）
-node tools/verify-assets.mjs       # exit 0：lib/random.js 与 android/app/assets/js/random.js 必须逐字节一致
+node --test                        # 101 pass / 0 fail（13 个测试文件）
+node tools/lint-syntax.mjs         # 72/72（递归覆盖 main/、renderer 子目录、android assets 子目录）
+node tools/verify-assets.mjs       # exit 0：lib/random.js 与 lib/lrc.js 双端副本逐字节一致 + 35 处页面引用存在
 ```
 
-CI（`.github/workflows/test.yml`）三个 job：`test (ubuntu-latest)`、`test (windows-latest)`、`apk (windows-latest)`；最近一次 run 对 `ab91c70` 全 success。`apk` job 的产物是**随机口令自签包，只能证明"能打包"，不可发版**。
+CI（`.github/workflows/test.yml`）三个 job：`test (ubuntu-latest)`、`test (windows-latest)`、`apk (windows-latest)`（9 步，已加 `package-lock.json` + `npm ci` + 缓存 + `cmdline-tools` 快路径）。`apk` job 在无 secrets 时出随机口令自签包，只证明"能打包"，不可发版。
 
 ## 8. 构建与发布
 
@@ -185,10 +185,10 @@ git -c credential.helper= -c http.proxy=http://127.0.0.1:7890 push \
 ## 10. 未完成项（都不紧急）
 
 1. **旧口令残留**：明文已从所有脚本清除，但仍存在于两处 DSH 运行时文件（`~/.dsh/dumate-faildump/fail-2026-11-18*.json`、`~/.dsh/storages/session_projcache/sessions/2fd545e5-*.json`）。彻底解决需密钥轮换，代价是老用户无法覆盖升级，故未做
-2. **assets 守门只守一半**：`verify-assets` 的 `SYNC_PAIRS` 目前只有 `lib/random.js` ↔ `assets/js/random.js`；`renderer/js/app.js` ↔ `assets/js/mobile.js` 因非逐字节副本暂不可守
-3. **CI 不出正式签名包**：配好 `APK_KEYSTORE`(base64) / `APK_KS_PASS` / `APK_KS_ALIAS` 三个 secrets 即可；另可给 cmdline-tools 下载加 `Test-Path` 快路径省十几秒
-4. **历史遗留小债**：`PlayerBridge.java` 是死代码未删；`mobile.css` 里 `.np.mode-lyrics .np-stage` 仍被 361 行的 `display:block` 覆盖（259 行修过字面 `\n`）；仓库未提交 `package-lock.json`（走 `npm install`）
-5. **回归预案**：若用户报告 v1.0.11 有任何行为变化，先 `git diff v1.0.10..v1.0.11`（应全是搬家），再用 `out/main-split-report.md` 的模块映射表定位
+2. **assets 守门覆盖范围**：`verify-assets` 的 `SYNC_PAIRS` 现已守住 `lib/random.js` 与 `lib/lrc.js` 两对；`renderer/js/app.js` ↔ `assets/js/mobile.js` 因壳层差异暂不可逐字节守
+3. **CI 不出正式签名包**：配好 `APK_KEYSTORE`(base64) / `APK_KS_PASS` / `APK_KS_ALIAS` 三个 secrets 即可
+4. **真机验收待办**：`v1.0.12` APK 已出包，待在小米平板 6 Pro 与手机上完成安装、歌词解析、深浅色 UI、横竖屏布局及下载/换源验收后再决定是否正式打 `v1.0.12` tag 发布
+5. **自动化覆盖扩面**：目前 101 用例已覆盖 `lib/`、`netapi.js`、`verify-assets` 及 Android 架构/安全守门；`main/` 与渲染层交互测试可按需继续补齐
 
 ## 11. 文档地图
 
@@ -211,8 +211,8 @@ git -c credential.helper= -c http.proxy=http://127.0.0.1:7890 push \
 # 1. 确认基线
 cd E:/dsh/work3/mp && git log --oneline -1 && node --test | tail -3
 
-# 2. 跑一次桌面（不需要打包，直接跑源码）
-node_modules/.bin/electron .        # 或用 out/mp45-portable 的运行时指向本目录
+# 2. 跑一次桌面（首次需先 npm ci，或直接用 out/mp45-portable 运行时）
+npm ci && node_modules/.bin/electron .        # 或用 out/mp45-portable 的运行时指向本目录
 
 # 3. 改完代码过质量门，再决定要不要出包
 node --test && node tools/lint-syntax.mjs && node tools/verify-assets.mjs
