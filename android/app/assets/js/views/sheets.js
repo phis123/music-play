@@ -1,13 +1,10 @@
 /*
- * views/sheets.js — 底部 <dialog> 弹层（操作面板/歌单/队列/设置抽屉）。
+ * views/sheets.js — 底部 <dialog> 弹层（操作面板/歌单/队列/调音抽屉，v2 统一 SVG 图标）。
  * 依赖：window.MP（本文件自行初始化）；无打包器，按 index.html 顺序加载。
  */
 'use strict';
 window.MP = window.MP || {};
 
-/* ---------------- 歌单 / 底部弹层 / 随机播放 ---------------- */
-/* 底部弹层：<dialog showModal()> —— 焦点陷阱 / inert / ::backdrop 浏览器白送。
-   返回键走 window.onAndroidBack（WebView 108 没有 closedby），Esc 走 dialog 的 cancel 事件。 */
 function sheetDlg() { return document.getElementById('sheetDlg'); }
 
 function openSheet(kind, arg) {
@@ -16,7 +13,7 @@ function openSheet(kind, arg) {
   if (!dlg) { render(); return; }
   dlg.innerHTML = sheetHtml();
   if (!dlg.open) dlg.showModal();
-  requestAnimationFrame(function () { dlg.classList.add('open'); });   // 108 没有 @starting-style，用类驱动进场
+  requestAnimationFrame(function () { dlg.classList.add('open'); });
   const inp = dlg.querySelector('#sheetInput');
   if (inp) setTimeout(function () { inp.focus(); if (inp.select) inp.select(); }, 40);
 }
@@ -34,38 +31,38 @@ function closeSheet() {
     dlg.innerHTML = '';
   };
   dlg.addEventListener('transitionend', fin, { once: true });
-  setTimeout(fin, 280);   // 兜底：动画被 reduced-motion 关掉也要能关
+  setTimeout(fin, 280);
 }
 
 function sheetHtml() {
   const sh = S.sheet;
   if (!sh || !sh.kind) return '';
   if (sh.kind === 'queue') {
-    const modeLabel = S.mode === 'shuffle' ? '🔀 随机播放' : S.mode === 'one' ? '🔂 单曲循环' : '🔁 顺序循环';
+    const modeIcon = S.mode === 'shuffle' ? ico('shuffle', 'ico-xs') : ico('repeat', 'ico-xs');
+    const modeText = S.mode === 'shuffle' ? '随机播放' : S.mode === 'one' ? '单曲循环' : '顺序循环';
     const items = S.queuePaths.map((p, i) => {
       const t = trackByPath(p);
       if (!t) return '';
       const isCur = i === S.cur;
       const eq = isCur ? `<span class="eq-bars${S.playing ? '' : ' paused'}"><i></i><i></i><i></i></span>` : '';
       return `<div class="q-item${isCur ? ' cur' : ''}" data-q-jump="${i}">
+        <span class="q-item-idx">${isCur ? eq : (i + 1)}</span>
         <div class="q-item-main">
-          <div class="q-item-title">${eq}${i + 1}. ${esc(t.title || '未知标题')}</div>
+          <div class="q-item-title">${esc(t.title || '未知标题')}</div>
           <div class="q-item-sub">${esc(t.artist || '未知艺人')} · ${fmt(t.duration)}</div>
         </div>
-        <button class="q-item-rm" data-q-rm="${i}" aria-label="从队列移除">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-        </button>
+        <button class="q-item-rm" data-q-rm="${i}" aria-label="从队列移除">${ico('close', 'ico-xs')}</button>
       </div>`;
     }).join('');
     return `<div class="sheet">
       <div class="sheet-head-row">
-        <div class="sheet-title">播放队列（${S.queuePaths.length}）</div>
-        <div style="display:flex;gap:6px">
-          <button class="sheet-sub-btn" data-q-mode="1">${modeLabel}</button>
+        <div class="sheet-title">播放队列 · ${S.queuePaths.length}</div>
+        <div class="sheet-head-acts">
+          <button class="sheet-sub-btn" data-q-mode="1">${modeIcon}<span>${modeText}</span></button>
           ${S.queuePaths.length ? '<button class="sheet-sub-btn danger" data-q-clear="1">清空</button>' : ''}
         </div>
       </div>
-      <div class="q-list" id="qListBox">${items || '<div class="sheet-dim" style="padding:24px 0;text-align:center">队列还是空的，去点首歌吧</div>'}</div>
+      <div class="q-list" id="qListBox">${items || '<div class="sheet-dim sheet-empty">队列还是空的，去选一首歌吧</div>'}</div>
       <div class="sheet-acts">
         <button class="sheet-btn ghost" data-sheet-close="1">关闭</button>
       </div>
@@ -110,8 +107,8 @@ function sheetHtml() {
             </div>
           </div>
           <div class="src-acts">
-            <button class="src-pv${isPv ? ' on' : ''}" data-src-pv="${idx}" ${sw.busyId ? 'disabled' : ''}>${isPv ? '❚❚ 停止' : '▶ 试听'}</button>
-            <button class="src-use" data-src-use="${idx}" ${sw.busyId ? 'disabled' : ''}>${isBusy ? '替换中…' : '选用替换'}</button>
+            <button class="src-pv${isPv ? ' on' : ''}" data-src-pv="${idx}" ${sw.busyId ? 'disabled' : ''}>${ico(isPv ? 'pause' : 'play', 'ico-xs')}<span>${isPv ? '停止' : '试听'}</span></button>
+            <button class="src-use" data-src-use="${idx}" ${sw.busyId ? 'disabled' : ''}>${isBusy ? '替换中…' : '替换'}</button>
           </div>
         </div>`;
       }).join('');
@@ -120,7 +117,7 @@ function sheetHtml() {
       <div class="sheet-head-row">
         <div>
           <div class="sheet-title">更换声源</div>
-          <div class="sheet-dim" style="margin-top:2px">${esc(t.title || '未知')} — ${esc(t.artist || '未知艺人')}（当前 ${fmt(t.duration)}${esc(curVoiceTxt)}）</div>
+          <div class="sheet-dim">${esc(t.title || '未知')} — ${esc(t.artist || '未知艺人')}（当前 ${fmt(t.duration)}${esc(curVoiceTxt)}）</div>
         </div>
       </div>
       <div class="src-search">
@@ -149,10 +146,10 @@ function sheetHtml() {
       <div class="sheet-head-row">
         <div>
           <div class="sheet-title">任务报错与异常详情（${errs.length}）</div>
-          <div class="sheet-dim" style="margin-top:2px">${esc(S.task.title || '')}</div>
+          <div class="sheet-dim">${esc(S.task.title || '')}</div>
         </div>
       </div>
-      <div class="err-list">${rows || '<div class="sheet-dim" style="padding:18px 0;text-align:center">暂无报错记录</div>'}</div>
+      <div class="err-list">${rows || '<div class="sheet-dim sheet-empty">暂无报错记录</div>'}</div>
       <div class="sheet-acts">
         <button class="sheet-btn ghost" data-sheet-close="1">关闭</button>
       </div>
@@ -163,7 +160,7 @@ function sheetHtml() {
       <div class="sheet-head-row">
         <div>
           <div class="sheet-title">环境快照</div>
-          <div class="sheet-dim" style="margin-top:2px">设备 / 屏幕 / WebView / 权限 / 存储 / 播放状态</div>
+          <div class="sheet-dim">设备 / 屏幕 / WebView / 权限 / 存储 / 播放状态</div>
         </div>
       </div>
       <pre class="diag-pre">${esc(S.diagSnapshotText || '')}</pre>
@@ -179,48 +176,48 @@ function sheetHtml() {
     const offSec = ((S.offset || 0) / 1000).toFixed(1);
     const floatShown = !!(A && A.overlayShown && A.overlayShown());
     const floatLocked = !!(A && A.overlayLocked && A.overlayLocked());
-    const floatSwatches = ['#ffffff', '#ec4141', '#4da3ff', '#ffd54a', '#4ade80', '#ff8ad4', '#c084fc'];
+    const floatSwatches = ['#ffffff', '#e53945', '#4da3ff', '#ffd54a', '#4ade80', '#ff8ad4', '#c084fc'];
     return `<div class="sheet">
       <div class="sheet-head-row">
         <div>
-          <div class="sheet-title">播放设置（单曲调音 / 歌词延迟 / 悬浮词）</div>
-          <div class="sheet-dim" style="margin-top:2px">${esc(t ? (t.title || '当前曲目') : '未在播放')}</div>
+          <div class="sheet-title">播放设置</div>
+          <div class="sheet-dim">${esc(t ? (t.title || '当前曲目') : '未在播放')}</div>
         </div>
       </div>
 
       <div class="npset-sec">
         <div class="npset-head">
-          <span class="npset-title">♪ 本曲音量平衡（单歌微调）</span>
+          <span class="npset-title">${ico('wave', 'ico-xs')}<span>本曲音量平衡</span></span>
           <span class="npset-sub" id="mobMiniGainInfo">自动 ${autoDb >= 0 ? '+' : ''}${autoDb.toFixed(1)}dB · 合成 ${totalDb >= 0 ? '+' : ''}${totalDb.toFixed(1)}dB</span>
         </div>
         <div class="npset-row">
-          <span style="font-size:12px;color:var(--dim)">单曲增益</span>
+          <span class="npset-lbl">单曲增益</span>
           <input type="range" id="mobMiniGainRange" min="-12" max="12" step="0.5" value="${manualDb}">
-          <span id="mobMiniGainVal" style="font-size:12px;font-weight:700;min-width:48px;text-align:right">${manualDb > 0 ? '+' : ''}${manualDb.toFixed(1)}dB</span>
+          <span id="mobMiniGainVal" class="npset-val">${manualDb > 0 ? '+' : ''}${manualDb.toFixed(1)}dB</span>
         </div>
         <div class="npset-chips">
           <button class="npset-chip" data-npset-gain="-1.5">-1.5dB</button>
           <button class="npset-chip" data-npset-gain="-0.5">-0.5dB</button>
-          <button class="npset-chip${manualDb === 0 ? ' on' : ''}" data-npset-gain="reset">重置 0dB</button>
+          <button class="npset-chip${manualDb === 0 ? ' on' : ''}" data-npset-gain="reset">归零</button>
           <button class="npset-chip" data-npset-gain="0.5">+0.5dB</button>
           <button class="npset-chip" data-npset-gain="1.5">+1.5dB</button>
-          <button class="npset-chip${S.normEnabled ? ' on' : ''}" data-npset-normtoggle="1" style="margin-left:auto">${S.normEnabled ? '全局均衡:开' : '全局均衡:关'}</button>
+          <button class="npset-chip npset-chip-right${S.normEnabled ? ' on' : ''}" data-npset-normtoggle="1">${S.normEnabled ? '全局均衡:开' : '全局均衡:关'}</button>
         </div>
       </div>
 
       <div class="npset-sec">
         <div class="npset-head">
-          <span class="npset-title">⏱ 本曲歌词延迟微调</span>
+          <span class="npset-title">${ico('clock', 'ico-xs')}<span>歌词延迟微调</span></span>
           <span class="npset-sub" id="mobMiniOffVal">当前偏移 ${S.offset > 0 ? '+' : ''}${offSec}s</span>
         </div>
         <div class="npset-row">
-          <span style="font-size:12px;color:var(--dim)">时间轴</span>
+          <span class="npset-lbl">时间轴</span>
           <input type="range" id="mobMiniOffRange" min="-5000" max="5000" step="100" value="${Math.max(-5000, Math.min(5000, S.offset || 0))}">
         </div>
         <div class="npset-chips">
           <button class="npset-chip" data-npset-off="-500">-0.5s</button>
           <button class="npset-chip" data-npset-off="-100">提前 0.1s</button>
-          <button class="npset-chip${!S.offset ? ' on' : ''}" data-npset-off="reset">重置 0.0s</button>
+          <button class="npset-chip${!S.offset ? ' on' : ''}" data-npset-off="reset">重置</button>
           <button class="npset-chip" data-npset-off="100">延后 0.1s</button>
           <button class="npset-chip" data-npset-off="500">+0.5s</button>
         </div>
@@ -228,26 +225,26 @@ function sheetHtml() {
 
       <div class="npset-sec">
         <div class="npset-head">
-          <span class="npset-title">💬 悬浮歌词设计</span>
-          <div style="display:flex;gap:6px">
-            <button class="npset-chip${floatShown ? ' on' : ''}" data-npset-float="toggle">${floatShown ? '悬浮词:已开' : '开启悬浮词'}</button>
+          <span class="npset-title">${ico('float', 'ico-xs')}<span>悬浮歌词</span></span>
+          <div class="sheet-head-acts">
+            <button class="npset-chip${floatShown ? ' on' : ''}" data-npset-float="toggle">${floatShown ? '已开启' : '开启悬浮词'}</button>
             <button class="npset-chip${floatLocked ? ' on' : ''}" data-npset-float="lock">${floatLocked ? '解锁穿透' : '锁定穿透'}</button>
           </div>
         </div>
         <div class="npset-row">
-          <span style="font-size:12px;color:var(--dim);min-width:44px">字号</span>
+          <span class="npset-lbl">字号</span>
           <input type="range" id="mobMiniFloatSz" min="12" max="28" step="1" value="${S.floatSizeSp}">
-          <span id="mobMiniFloatSzVal" style="font-size:12px;font-weight:700;min-width:40px;text-align:right">${S.floatSizeSp}sp</span>
+          <span id="mobMiniFloatSzVal" class="npset-val">${S.floatSizeSp}sp</span>
         </div>
         <div class="npset-row">
-          <span style="font-size:12px;color:var(--dim);min-width:44px">底色度</span>
+          <span class="npset-lbl">底色度</span>
           <input type="range" id="mobMiniFloatBg" min="0" max="80" step="5" value="${S.floatBgOpacity}">
-          <span id="mobMiniFloatBgVal" style="font-size:12px;font-weight:700;min-width:40px;text-align:right">${S.floatBgOpacity}%</span>
+          <span id="mobMiniFloatBgVal" class="npset-val">${S.floatBgOpacity}%</span>
         </div>
         <div class="npset-row">
-          <span style="font-size:12px;color:var(--dim);min-width:44px">配色</span>
+          <span class="npset-lbl">配色</span>
           <div class="set-swatches">
-            ${floatSwatches.map((c) => `<span class="set-swatch${S.floatColor.toLowerCase() === c ? ' on' : ''}" data-npset-floatcol="${c}" style="width:22px;height:22px;background:${c}"></span>`).join('')}
+            ${floatSwatches.map((c) => `<span class="set-swatch set-swatch-sm${S.floatColor.toLowerCase() === c ? ' on' : ''}" data-npset-floatcol="${c}" style="background:${c}"></span>`).join('')}
           </div>
         </div>
       </div>
@@ -262,7 +259,7 @@ function sheetHtml() {
     return `<div class="sheet">
       <div class="sheet-title">调整曲库与下载目录</div>
       <div class="sheet-line">选择预设目录或在下方输入 <code>/sdcard/Music/</code> 下的子文件夹名：</div>
-      <div class="npset-chips" style="margin:8px 0 10px">
+      <div class="npset-chips" style="margin:10px 0 12px">
         <button class="npset-chip" data-dir-preset="music-play">默认 (Music/music-play)</button>
         <button class="npset-chip" data-dir-preset="/storage/emulated/0/Music">系统 Music 根目录</button>
         <button class="npset-chip" data-dir-preset="music-play-podcast">Music/music-play-podcast</button>
@@ -299,8 +296,8 @@ function sheetHtml() {
     title = '加入歌单';
     const rows = S.playlists.map((p) => `<button class="sheet-item" data-sheet-pl="${esc(p.id)}">
         <span class="sheet-item-t">${esc(p.name)}</span>
-        <span class="sheet-item-s">${p.tracks.length} 首 ›</span></button>`).join('');
-    body = `<div class="sheet-list">${rows || '<div class="sheet-dim" style="padding:10px 2px">还没有歌单</div>'}</div>`;
+        <span class="sheet-item-s">${p.tracks.length} 首</span></button>`).join('');
+    body = `<div class="sheet-list">${rows || '<div class="sheet-dim sheet-empty">还没有歌单</div>'}</div>`;
     okText = '新建歌单';
   }
   return `<div class="sheet">
@@ -391,9 +388,6 @@ function removeFromPlaylist(pl, path) {
   toast('已移出歌单');
 }
 
-/** 真删文件（弹层确认后调用） */
-
-/** 真删文件（弹层确认后调用） */
 function deleteTrackNow(t) {
   if (!t) return;
   if (!A || !A.removeFile) { toast('当前版本不支持删除'); return; }

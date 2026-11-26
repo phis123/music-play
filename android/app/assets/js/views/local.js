@@ -1,5 +1,5 @@
 /*
- * views/local.js — 本地/最近/喜欢/歌单列表视图与列表通用组件。
+ * views/local.js — 本地/最近/喜欢/歌单/个人中心视图与通用组件（v2 重构）。
  * 依赖：window.MP（本文件自行初始化）；无打包器，按 index.html 顺序加载。
  */
 'use strict';
@@ -13,18 +13,20 @@ function songRow(t, idx, plId, orderIdx) {
   const deferCls = orderIdx != null && orderIdx >= 24 ? ' cv-defer' : '';
   const eq = isCur ? `<span class="eq-bars${S.playing ? '' : ' paused'}"><i></i><i></i><i></i></span>` : '';
   const kb = t.kbps ? `<span class="badge-k">${t.kbps}k</span>` : '';
-  const qNextBtn = `<button class="row-act" data-qnext="${idx}" aria-label="下一首播放" title="下一首播放"><svg viewBox="0 0 24 24"><use href="#ico-qnext"/></svg></button>`;
+  const qNextBtn = `<button class="row-act" data-qnext="${idx}" aria-label="下一首播放" title="下一首播放">${ico('qnext')}</button>`;
   const acts = plId
-    ? `${qNextBtn}<button class="row-act" data-plrm="${esc(plId)}" data-path="${esc(t.path)}" aria-label="移出歌单"><svg viewBox="0 0 24 24"><use href="#ico-plrm"/></svg></button>`
-    : `${qNextBtn}<button class="row-act" data-pladd="${idx}" aria-label="加入歌单"><svg viewBox="0 0 24 24"><use href="#ico-pladd"/></svg></button><button class="row-act del" data-del="${idx}" aria-label="删除"><svg viewBox="0 0 24 24"><use href="#ico-del"/></svg></button>`;
+    ? `${qNextBtn}<button class="row-act" data-plrm="${esc(plId)}" data-path="${esc(t.path)}" aria-label="移出歌单">${ico('plrm')}</button>`
+    : `${qNextBtn}<button class="row-act" data-pladd="${idx}" aria-label="加入歌单">${ico('pladd')}</button><button class="row-act del" data-del="${idx}" aria-label="删除">${ico('del')}</button>`;
   return `<div class="row${isCur ? ' playing' : ''}${deferCls}" data-song="${idx}" data-path="${esc(t.path)}">
     <div class="row-cover" data-cover="${idx}"></div>
     <div class="row-main">
-      <div class="row-title"><span class="row-eq-slot">${eq}</span>${esc(t.title || '未知标题')}${kb}</div>
-      <div class="row-sub">${esc(t.artist || '未知艺人')} · ${fmt(t.duration)}${t.hasLrc ? ' · 词' : ''}</div>
+      <div class="row-title"><span class="row-eq-slot">${eq}</span><span class="row-title-txt">${esc(t.title || '未知标题')}</span>${kb}</div>
+      <div class="row-sub">${esc(t.artist || '未知艺人')} · ${fmt(t.duration)}${t.hasLrc ? ' · 双语词' : ''}</div>
     </div>
-    <button class="row-act ${on ? 'on' : ''}" data-fav="${idx}" aria-label="喜欢"><svg viewBox="0 0 24 24" fill="${on ? 'currentColor' : 'none'}"><use href="#ico-heart"/></svg></button>
-    ${acts}
+    <div class="row-actions">
+      <button class="row-act ${on ? 'on' : ''}" data-fav="${idx}" aria-label="喜欢"><svg class="ico" viewBox="0 0 24 24" fill="${on ? 'currentColor' : 'none'}"><use href="#ico-heart"/></svg></button>
+      ${acts}
+    </div>
   </div>`;
 }
 
@@ -36,7 +38,6 @@ function totalDurStr(list) {
 }
 
 const _zhCollator = (typeof Intl !== 'undefined' && Intl.Collator) ? new Intl.Collator('zh-CN') : null;
-
 const cmpZh = (a, b) => _zhCollator ? _zhCollator.compare(a, b) : String(a).localeCompare(String(b));
 
 function filterAndSortTracks(list) {
@@ -44,15 +45,10 @@ function filterAndSortTracks(list) {
   const kw = (S.listFilter || '').trim();
   if (kw) out = out.filter((t) => matchTrack(t, kw));
   const st = S.listSort || 'default';
-  if (st === 'title') {
-    out.sort((a, b) => cmpZh(a.title || '', b.title || ''));
-  } else if (st === 'artist') {
-    out.sort((a, b) => cmpZh(a.artist || '', b.artist || ''));
-  } else if (st === 'duration') {
-    out.sort((a, b) => (+(b.duration || 0)) - (+(a.duration || 0)));
-  } else if (st === 'recent') {
-    out.sort((a, b) => (+(b.id || 0)) - (+(a.id || 0)));
-  }
+  if (st === 'title') out.sort((a, b) => cmpZh(a.title || '', b.title || ''));
+  else if (st === 'artist') out.sort((a, b) => cmpZh(a.artist || '', b.artist || ''));
+  else if (st === 'duration') out.sort((a, b) => (+(b.duration || 0)) - (+(a.duration || 0)));
+  else if (st === 'recent') out.sort((a, b) => (+(b.id || 0)) - (+(a.id || 0)));
   return out;
 }
 
@@ -61,7 +57,7 @@ function heroCardHtml(opts) {
   const covAttr = firstIdx >= 0 ? `data-cover="${firstIdx}"` : '';
   return `<div class="hero-card">
     <div class="hero-cover" ${covAttr}>
-      ${firstIdx < 0 ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18V6.5l9-2V16"/><circle cx="6.6" cy="18" r="2.4"/><circle cx="15.6" cy="16" r="2.4"/></svg>' : ''}
+      ${firstIdx < 0 ? ico('disc', 'hero-fallback-ico') : ''}
     </div>
     <div class="hero-main">
       <div class="hero-title">${esc(opts.title)}</div>
@@ -82,8 +78,8 @@ function listToolbarHtml() {
   ];
   return `<div class="list-toolbar">
     <div class="list-filter">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="6.4"/><path d="M16 16l4.5 4.5"/></svg>
-      <input id="listFilterInput" type="search" placeholder="在当前列表中筛选歌曲/歌手…" value="${esc(S.listFilter)}">
+      <span class="filter-ico">${ico('search', 'ico-xs')}</span>
+      <input id="listFilterInput" type="search" placeholder="筛选歌曲 / 歌手…" value="${esc(S.listFilter)}">
     </div>
     <div class="list-sorts">
       ${sorts.map(([k, lbl]) => `<button class="sort-pill${st === k ? ' on' : ''}" data-sort="${k}">${lbl}</button>`).join('')}
@@ -104,11 +100,8 @@ function currentListBaseTracks() {
 }
 
 const SONG_FIRST_CHUNK = 28;
-
 const SONG_NEXT_CHUNK = 36;
-
 let _pendingSongList = [];
-
 let _pendingSongPlId = undefined;
 
 function renderListRowsHtml() {
@@ -118,9 +111,7 @@ function renderListRowsHtml() {
   _currentShownTracks = shown;
   _pendingSongList = shown;
   _pendingSongPlId = plId;
-  if (!shown.length) {
-    return `<div class="search-hint">没有符合筛选条件的歌曲</div>`;
-  }
+  if (!shown.length) return '<div class="search-hint">没有符合筛选条件的歌曲</div>';
   const firstSlice = shown.slice(0, SONG_FIRST_CHUNK);
   return `<div class="list-2col" id="songGridBox">${firstSlice.map((t, k) => songRow(t, t._idx, plId, k)).join('')}</div>`;
 }
@@ -130,7 +121,6 @@ async function mountSongRowsChunked() {
   const list = _pendingSongList || [];
   const plId = _pendingSongPlId;
   if (list.length <= SONG_FIRST_CHUNK) return;
-  // 先让出主线程，让首屏 28 首立即完成排版与上屏绘制（首屏 < 15ms）
   await new Promise((resolve) => requestAnimationFrame(resolve));
   if (token !== _songChunkToken) return;
   let offset = SONG_FIRST_CHUNK;
@@ -146,11 +136,8 @@ async function mountSongRowsChunked() {
     paintCovers(b);
     offset += slice.length;
     if (offset < list.length && performance.now() >= deadline) {
-      if ('scheduler' in window && 'yield' in window.scheduler) {
-        await window.scheduler.yield();
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
+      if ('scheduler' in window && 'yield' in window.scheduler) await window.scheduler.yield();
+      else await new Promise((resolve) => setTimeout(resolve, 0));
       deadline = performance.now() + 50;
     }
   }
@@ -174,44 +161,47 @@ function viewLocal() {
     sub: `共 ${list.length} 首${totalDurStr(list)}`,
     firstTrack: list[0],
     actsHtml: `
-      <button class="hero-btn pri" data-list-playall="1"><svg viewBox="0 0 24 24"><path d="M8 5.6v12.8a.9.9 0 0 0 1.38.77l10-6.4a.9.9 0 0 0 0-1.54l-10-6.4A.9.9 0 0 0 8 5.6z"/></svg>播放全部</button>
-      <button class="hero-btn" data-list-shuffle="1">随机播放</button>
-      <button class="hero-btn" data-rescan="1">刷新扫描</button>
-      <button class="hero-btn" data-go="settings">⚙ 目录与设置</button>`,
+      <button class="hero-btn pri" data-list-playall="1">${ico('play', 'ico-xs')}<span>播放全部</span></button>
+      <button class="hero-btn" data-list-shuffle="1">${ico('shuffle', 'ico-xs')}<span>随机播放</span></button>
+      <button class="hero-btn" data-rescan="1">${ico('refresh', 'ico-xs')}<span>刷新扫描</span></button>
+      <button class="hero-btn" data-go="settings">${ico('sliders', 'ico-xs')}<span>目录与设置</span></button>`,
   });
   if (!list.length) {
-    return backBar('本地音乐') + hero +
-      `<div class="empty"><div class="big">还没有歌曲</div><div>点「刷新扫描」或去「设置」查看下载目录与存储权限</div></div>`;
+    return `<div class="page-shell">${backBar('本地音乐')}${hero}<div class="empty"><div class="big">还没有歌曲</div><div>点「刷新扫描」或前往「设置」查看下载目录与存储权限</div></div></div>`;
   }
-  return backBar('本地音乐') + hero + listToolbarHtml() + `<div id="listBody">${renderListRowsHtml()}</div>`;
+  return `<div class="page-shell">${backBar('本地音乐')}${hero}${listToolbarHtml()}<div id="listBody">${renderListRowsHtml()}</div></div>`;
 }
 
 function viewRecent() {
   const list = recentTracks();
-  if (!list.length) return backBar('最近播放') + '<div class="empty"><div class="big">还没有播放记录</div><div>听过的歌会出现在这里</div></div>';
+  if (!list.length) {
+    return `<div class="page-shell">${backBar('最近播放')}<div class="empty"><div class="big">还没有播放记录</div><div>听过的歌会出现在这里</div></div></div>`;
+  }
   const hero = heroCardHtml({
     title: '最近播放',
     sub: `最近 ${list.length} 首${totalDurStr(list)}`,
     firstTrack: list[0],
     actsHtml: `
-      <button class="hero-btn pri" data-list-playall="1"><svg viewBox="0 0 24 24"><path d="M8 5.6v12.8a.9.9 0 0 0 1.38.77l10-6.4a.9.9 0 0 0 0-1.54l-10-6.4A.9.9 0 0 0 8 5.6z"/></svg>播放全部</button>
-      <button class="hero-btn" data-list-shuffle="1">随机播放</button>`,
+      <button class="hero-btn pri" data-list-playall="1">${ico('play', 'ico-xs')}<span>播放全部</span></button>
+      <button class="hero-btn" data-list-shuffle="1">${ico('shuffle', 'ico-xs')}<span>随机播放</span></button>`,
   });
-  return backBar('最近播放') + hero + listToolbarHtml() + `<div id="listBody">${renderListRowsHtml()}</div>`;
+  return `<div class="page-shell">${backBar('最近播放')}${hero}${listToolbarHtml()}<div id="listBody">${renderListRowsHtml()}</div></div>`;
 }
 
 function viewLiked() {
   const list = favTracks();
-  if (!list.length) return backBar('我喜欢的音乐') + `<div class="empty"><div class="big">还没有喜欢的歌</div><div>在歌曲右侧点心形收藏</div></div>`;
+  if (!list.length) {
+    return `<div class="page-shell">${backBar('我喜欢的音乐')}<div class="empty"><div class="big">还没有喜欢的歌</div><div>点击歌曲右侧心形即可收藏</div></div></div>`;
+  }
   const hero = heroCardHtml({
     title: '我喜欢的音乐',
     sub: `共 ${list.length} 首${totalDurStr(list)}`,
     firstTrack: list[0],
     actsHtml: `
-      <button class="hero-btn pri" data-list-playall="1"><svg viewBox="0 0 24 24"><path d="M8 5.6v12.8a.9.9 0 0 0 1.38.77l10-6.4a.9.9 0 0 0 0-1.54l-10-6.4A.9.9 0 0 0 8 5.6z"/></svg>播放全部</button>
-      <button class="hero-btn" data-list-shuffle="1">随机播放</button>`,
+      <button class="hero-btn pri" data-list-playall="1">${ico('play', 'ico-xs')}<span>播放全部</span></button>
+      <button class="hero-btn" data-list-shuffle="1">${ico('shuffle', 'ico-xs')}<span>随机播放</span></button>`,
   });
-  return backBar('我喜欢的音乐') + hero + listToolbarHtml() + `<div id="listBody">${renderListRowsHtml()}</div>`;
+  return `<div class="page-shell">${backBar('我喜欢的音乐')}${hero}${listToolbarHtml()}<div id="listBody">${renderListRowsHtml()}</div></div>`;
 }
 
 function viewPlaylists() {
@@ -220,97 +210,114 @@ function viewPlaylists() {
     const covIdx = firstT ? S.tracks.indexOf(firstT) : -1;
     return `<div class="row" data-pl="${esc(p.id)}">
       <div class="row-cover" ${covIdx >= 0 ? `data-cover="${covIdx}"` : ''}></div>
-      <div class="row-main"><div class="row-title">${esc(p.name)}</div>
-      <div class="row-sub">${p.tracks.length} 首</div></div>
-      <button class="row-act del" data-pldel="${esc(p.id)}" aria-label="删除歌单">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9.5 7V4.8h5V7M6.2 7l.9 12.4a1 1 0 0 0 1 .9h7.8a1 1 0 0 0 1-.9L17.8 7"/><path d="M10.2 11v6M13.8 11v6"/></svg>
-      </button>
+      <div class="row-main">
+        <div class="row-title"><span class="row-title-txt">${esc(p.name)}</span></div>
+        <div class="row-sub">${p.tracks.length} 首歌曲</div>
+      </div>
+      <div class="row-actions">
+        <button class="row-act del" data-pldel="${esc(p.id)}" aria-label="删除歌单">${ico('del')}</button>
+      </div>
     </div>`;
   }).join('');
-  return backBar('歌单') +
-    `<button class="quick-item" id="newPl" style="width:100%;display:flex;align-items:center;gap:10px;margin-bottom:12px">
-       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" style="width:18px;height:18px"><path d="M12 5v14M5 12h14"/></svg>
-       <span style="font-size:13.5px;font-weight:600">新建歌单</span></button>
-     ${rows || `<div class="empty"><div class="big">还没有歌单</div><div>点上面「新建歌单」创建一个</div></div>`}`;
+  return `<div class="page-shell">${backBar('歌单')}
+    <button class="new-pl-btn" id="newPl" type="button">
+      <span class="new-pl-ico">${ico('pladd', 'ico-sm')}</span>
+      <span class="new-pl-text">新建歌单</span>
+    </button>
+    ${rows ? `<div class="list-2col">${rows}</div>` : '<div class="empty"><div class="big">还没有歌单</div><div>点击上方「新建歌单」创建一个</div></div>'}
+  </div>`;
 }
 
 function viewPlaylist(id) {
   const p = S.playlists.find((x) => x.id === id);
-  if (!p) return backBar('歌单') + `<div class="empty">歌单不存在</div>`;
+  if (!p) return `<div class="page-shell">${backBar('歌单')}<div class="empty">歌单不存在</div></div>`;
   const list = p.tracks.map(trackByPath).filter(Boolean);
   const hero = heroCardHtml({
     title: p.name,
     sub: `共 ${list.length} 首${totalDurStr(list)}`,
     firstTrack: list[0],
     actsHtml: `
-      <button class="hero-btn pri" data-plplay="${esc(p.id)}"><svg viewBox="0 0 24 24"><path d="M8 5.6v12.8a.9.9 0 0 0 1.38.77l10-6.4a.9.9 0 0 0 0-1.54l-10-6.4A.9.9 0 0 0 8 5.6z"/></svg>播放全部</button>
-      <button class="hero-btn" data-plshuffle="${esc(p.id)}">随机</button>
-      <button class="hero-btn" data-plrename="${esc(p.id)}">重命名</button>
-      <button class="hero-btn danger" data-pldel="${esc(p.id)}">删除歌单</button>`,
+      <button class="hero-btn pri" data-plplay="${esc(p.id)}">${ico('play', 'ico-xs')}<span>播放全部</span></button>
+      <button class="hero-btn" data-plshuffle="${esc(p.id)}">${ico('shuffle', 'ico-xs')}<span>随机</span></button>
+      <button class="hero-btn" data-plrename="${esc(p.id)}"><span>重命名</span></button>
+      <button class="hero-btn danger" data-pldel="${esc(p.id)}">${ico('del', 'ico-xs')}<span>删除歌单</span></button>`,
   });
-  return backBar(p.name) + hero +
-    (list.length
+  return `<div class="page-shell">${backBar(p.name)}${hero}${
+    list.length
       ? listToolbarHtml() + `<div id="listBody">${renderListRowsHtml()}</div>`
-      : '<div class="empty"><div class="big">歌单还是空的</div><div>在歌曲行点「＋」就能加进来</div></div>');
+      : '<div class="empty"><div class="big">歌单还是空的</div><div>在歌曲行点击「＋」即可加入</div></div>'
+  }</div>`;
 }
 
 function viewMe() {
-  return `
-    <div class="me-head">
-      <div class="me-avatar">M</div>
-      <div style="flex:1;min-width:0">
+  const rootPath = (function () { try { return A && A.rootDir ? A.rootDir() : ''; } catch (e) { return ''; } })();
+  const bTag = (function () { try { return (window.Android && window.Android.buildTag) ? window.Android.buildTag() : 'web-preview'; } catch (e) { return '?'; } })();
+  return `<div class="page-shell">
+    <div class="me-card">
+      <div class="me-avatar">${ico('disc')}</div>
+      <div class="me-info">
         <div class="me-name">本地音乐库</div>
-        <div class="me-sub">${S.tracks.length} 首 · 我喜欢 ${S.favs.size} 首 · ${S.playlists.length} 个歌单</div>
-        <div class="me-sub" style="opacity:.6;font-size:11px">曲库 ${esc((function(){try{return A.rootDir? A.rootDir() : ''}catch(e){return ''}})())}</div>
-        <div class="me-sub" style="opacity:.55;font-size:11px">build ${
-          (function(){ try { return (window.Android && window.Android.buildTag) ? window.Android.buildTag() : 'web-preview'; } catch(e){ return '?'; } })()
-        }</div>
+        <div class="me-sub">${S.tracks.length} 首歌曲 · 喜欢 ${S.favs.size} 首 · ${S.playlists.length} 个歌单</div>
+        <div class="me-meta">${esc(rootPath)} · ${esc(bTag)}</div>
       </div>
     </div>
-    <div class="entry" style="cursor:default">
-      <div class="entry-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2"/></svg></div>
-      <div class="entry-main"><div class="entry-title">外观主题</div><div class="entry-sub">浅色 / 深色 / 跟随系统</div></div>
-      <div class="theme-seg">
-        <button data-theme-set="light" class="${S.theme === 'light' ? 'on' : ''}">浅色</button>
-        <button data-theme-set="dark" class="${S.theme === 'dark' ? 'on' : ''}">深色</button>
-        <button data-theme-set="auto" class="${S.theme === 'auto' ? 'on' : ''}">跟随</button>
+
+    <div class="entry-group">
+      <div class="entry entry-static">
+        <div class="entry-ico tone-amber">${ico('sun')}</div>
+        <div class="entry-main">
+          <div class="entry-title">外观主题</div>
+          <div class="entry-sub">浅色 / 深色 / 跟随系统</div>
+        </div>
+        <div class="theme-seg">
+          <button data-theme-set="light" class="${S.theme === 'light' ? 'on' : ''}">浅色</button>
+          <button data-theme-set="dark" class="${S.theme === 'dark' ? 'on' : ''}">深色</button>
+          <button data-theme-set="auto" class="${S.theme === 'auto' ? 'on' : ''}">跟随</button>
+        </div>
       </div>
     </div>
-    <div class="entry" data-go="local">
-      <div class="entry-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="2.2"/><path d="M7.5 5v5.5h9V5"/><path d="M7.5 14.5h9"/></svg></div>
-      <div class="entry-main"><div class="entry-title">本地音乐</div><div class="entry-sub">${S.tracks.length} 首歌曲</div></div>
-      <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+
+    <div class="entry-group">
+      <div class="entry" data-go="local">
+        <div class="entry-ico tone-red">${ico('disc')}</div>
+        <div class="entry-main"><div class="entry-title">本地音乐</div><div class="entry-sub">${S.tracks.length} 首歌曲</div></div>
+        <span class="chev">${ico('chev-right', 'ico-sm')}</span>
+      </div>
+      <div class="entry" data-go="liked">
+        <div class="entry-ico tone-red">${ico('heart', '', 'none')}</div>
+        <div class="entry-main"><div class="entry-title">我喜欢的音乐</div><div class="entry-sub">${S.favs.size} 首</div></div>
+        <span class="chev">${ico('chev-right', 'ico-sm')}</span>
+      </div>
+      <div class="entry" data-go="recent">
+        <div class="entry-ico tone-blue">${ico('clock')}</div>
+        <div class="entry-main"><div class="entry-title">最近播放</div><div class="entry-sub">最多保留 30 首</div></div>
+        <span class="chev">${ico('chev-right', 'ico-sm')}</span>
+      </div>
+      <div class="entry" data-go="playlists">
+        <div class="entry-ico tone-green">${ico('playlist')}</div>
+        <div class="entry-main"><div class="entry-title">歌单</div><div class="entry-sub">${S.playlists.length} 个自建歌单</div></div>
+        <span class="chev">${ico('chev-right', 'ico-sm')}</span>
+      </div>
     </div>
-    <div class="entry" data-go="liked">
-      <div class="entry-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7.2-4.4-7.2-9.4A4.2 4.2 0 0 1 12 7.6a4.2 4.2 0 0 1 7.2 3C19.2 15.6 12 20 12 20z"/></svg></div>
-      <div class="entry-main"><div class="entry-title">我喜欢的音乐</div><div class="entry-sub">${S.favs.size} 首</div></div>
-      <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+
+    <div class="entry-group">
+      <div class="entry" data-go="import">
+        <div class="entry-ico tone-blue">${ico('download')}</div>
+        <div class="entry-main"><div class="entry-title">批量导入</div><div class="entry-sub">粘贴歌单分享链接批量匹配下载</div></div>
+        <span class="chev">${ico('chev-right', 'ico-sm')}</span>
+      </div>
+      <div class="entry" data-go="settings">
+        <div class="entry-ico tone-slate">${ico('settings')}</div>
+        <div class="entry-main"><div class="entry-title">设置</div><div class="entry-sub">曲库目录 · 音量平衡 · 随机策略 · 歌词配色 · 体检诊断</div></div>
+        <span class="chev">${ico('chev-right', 'ico-sm')}</span>
+      </div>
     </div>
-    <div class="entry" data-go="recent">
-      <div class="entry-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 7.6V12l3 1.8"/></svg></div>
-      <div class="entry-main"><div class="entry-title">最近播放</div><div class="entry-sub">最多 30 首</div></div>
-      <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
-    </div>
-    <div class="entry" data-go="import">
-      <div class="entry-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10"/><path d="M8 10l4 4 4-4"/><path d="M5 18h14"/></svg></div>
-      <div class="entry-main"><div class="entry-title">批量导入</div><div class="entry-sub">粘贴分享链接批量下载</div></div>
-      <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
-    </div>
-    <div class="entry" data-go="playlists">
-      <div class="entry-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11M4 12h11M4 17h7"/><circle cx="17.5" cy="16" r="2.5"/><path d="M20 16V8l-3 1"/></svg></div>
-      <div class="entry-main"><div class="entry-title">歌单</div><div class="entry-sub">${S.playlists.length} 个</div></div>
-      <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
-    </div>
-    <div class="entry" data-go="settings">
-      <div class="entry-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>
-      <div class="entry-main"><div class="entry-title">设置</div><div class="entry-sub">下载目录 · 音量平衡 · 随机策略 · 歌词字号与配色 · 曲库体检</div></div>
-      <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
-    </div>`;
+  </div>`;
 }
 
 function backBar(title) {
-  return `<div style="display:flex;align-items:center;gap:8px;margin:0 0 14px">
-    <button id="goBack" style="width:34px;height:34px;display:grid;place-items:center;color:var(--text-2)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:21px;height:21px"><path d="M15 5l-7 7 7 7"/></svg>
-    </button><div class="h1" style="font-size:18px">${esc(title)}</div></div>`;
+  return `<div class="page-bar">
+    <button id="goBack" class="back-btn" type="button" aria-label="返回">${ico('back')}</button>
+    <h1 class="page-bar-title">${esc(title)}</h1>
+  </div>`;
 }

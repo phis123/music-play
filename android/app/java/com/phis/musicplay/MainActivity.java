@@ -24,15 +24,13 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // 状态栏跟随主题
+        // 状态栏与导航栏跟随当前主题（浅色 Studio Paper / 深色 Obsidian Vinyl）
         Window w = getWindow();
         w.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-        w.setStatusBarColor(0xFFFFFFFF);
-        w.setNavigationBarColor(0xFFFFFFFF);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            w.getDecorView().setSystemUiVisibility(
-                    View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
-        }
+        boolean sysDark = (getResources().getConfiguration().uiMode
+                & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+        applySystemBars(sysDark);
 
         boolean isDebuggable = (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
         if (isDebuggable && Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
@@ -116,12 +114,13 @@ public class MainActivity extends Activity {
                 }
             }
         });
-        web.setBackgroundColor(0xFFFFFFFF);
+        web.setBackgroundColor(sysDark ? 0xFF0E0F13 : 0xFFF6F7F9);
 
         web.addJavascriptInterface(new Bridge(this, web), "Android");
+        web.addJavascriptInterface(new UiBridge(this), "AndroidUi");
 
         FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(0xFFFFFFFF);
+        root.setBackgroundColor(sysDark ? 0xFF0E0F13 : 0xFFF6F7F9);
         root.addView(web, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         setContentView(root);
@@ -190,6 +189,35 @@ public class MainActivity extends Activity {
                         else finish();
                     }
                 });
+    }
+
+    public void applySystemBars(boolean dark) {
+        try {
+            Window w = getWindow();
+            int bg = dark ? 0xFF0E0F13 : 0xFFF6F7F9;
+            w.setStatusBarColor(bg);
+            w.setNavigationBarColor(bg);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                int flags = 0;
+                if (!dark) {
+                    flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                    }
+                }
+                w.getDecorView().setSystemUiVisibility(flags);
+            }
+            if (web != null) web.setBackgroundColor(bg);
+        } catch (Throwable ignored) { }
+    }
+
+    private static final class UiBridge {
+        private final MainActivity act;
+        UiBridge(MainActivity act) { this.act = act; }
+        @JavascriptInterface
+        public void setDarkBars(final boolean dark) {
+            act.runOnUiThread(() -> act.applySystemBars(dark));
+        }
     }
 
     @Override

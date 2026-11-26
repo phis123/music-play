@@ -53,13 +53,13 @@ function viewHealth() {
     meta: '缺少歌手名或专辑封面的曲目，可一键联网自动补齐',
     short: '时长不足 25 秒的音频（可能是试听片段或损坏文件），可点播放后「换声源」重下',
   };
-  return backBar('曲库体检') + `
-    <div class="sub" style="margin:-6px 2px 12px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
-      <span>共扫描 ${S.tracks.length} 首本地音频</span>
-      <span style="display:flex;gap:6px;flex-wrap:wrap">
-        <button class="hero-btn" id="healthRebuildTags" style="padding:5px 12px;font-size:12px">重建歌手/封面</button>
-        <button class="hero-btn pri" id="healthFillMeta" style="padding:5px 12px;font-size:12px">一键补齐缺失歌词/封面</button>
-      </span>
+  return `<div class="page-shell">${backBar('曲库体检')}
+    <div class="health-head">
+      <span class="sub">共扫描 ${S.tracks.length} 首本地音频</span>
+      <div class="health-head-acts">
+        <button class="hero-btn" id="healthRebuildTags">${ico('refresh', 'ico-xs')}<span>重建歌手/封面</span></button>
+        <button class="hero-btn pri" id="healthFillMeta">${ico('sparkle', 'ico-xs')}<span>一键补齐缺失</span></button>
+      </div>
     </div>
     <div class="health-grid">
       ${cards.map(([k, lbl, cnt]) => `
@@ -68,9 +68,9 @@ function viewHealth() {
           <div class="health-stat-label">${lbl}</div>
         </div>`).join('')}
     </div>
-    <div class="sub" style="margin:0 2px 10px">${descMap[tab] || ''}</div>
+    <div class="sub health-desc">${descMap[tab] || ''}</div>
     ${curList.length
       ? `<div class="list-2col" id="songGridBox">${firstSlice.map((t, k) => songRow(t, t._idx, undefined, k)).join('')}</div>`
-      : `<div class="empty"><div class="big">太棒了，这一项没有发现问题</div><div>曲库状态非常健康</div></div>`}
-  `;
+      : `<div class="empty"><div class="big">这一项没有发现问题</div><div>曲库状态非常健康</div></div>`}
+  </div>`;
 }

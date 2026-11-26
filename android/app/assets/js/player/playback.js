@@ -155,8 +155,8 @@ function exitPreviewMode() { S.previewPath = null; }
 function paintPlayIcon() {
   // discSpinToggle: 唱盘旋转跟随播放状态
   document.querySelector('.np-stage')?.classList.toggle('playing', S.playing);
-  const play = '<path d="M8 5.6v12.8a.9.9 0 0 0 1.38.77l10-6.4a.9.9 0 0 0 0-1.54l-10-6.4A.9.9 0 0 0 8 5.6z"/>';
-  const pause = '<rect x="7.2" y="5" width="3.4" height="14" rx="1.4"/><rect x="13.4" y="5" width="3.4" height="14" rx="1.4"/>';
+  const play = '<path d="M8.4 5.7v12.6a.95.95 0 0 0 1.46.8l9.8-6.3a.95.95 0 0 0 0-1.6l-9.8-6.3a.95.95 0 0 0-1.46.8z"/>';
+  const pause = '<rect x="6.8" y="5.2" width="3.6" height="13.6" rx="1.4"/><rect x="13.6" y="5.2" width="3.6" height="13.6" rx="1.4"/>';
   $('#miniIcon').innerHTML = S.playing ? pause : play;
   $('#npIcon').innerHTML = S.playing ? pause : play;
   document.querySelectorAll('.eq-bars').forEach((el) => el.classList.toggle('paused', !S.playing));

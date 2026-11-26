@@ -64,7 +64,7 @@ public class PlaybackService extends Service {
     private String bgTaskTitle = "", bgTaskSub = "";
     private PowerManager.WakeLock bgWakeLock = null;
 
-    public static volatile String buildTagText = "2026-11-26.19:05-v1.0.12";
+    public static volatile String buildTagText = "2026-11-26.22:20-v1.0.12";
 
     /** 播放状态回调（Bridge 实现，用来推给网页） */
     public interface Listener {

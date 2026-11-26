@@ -42,8 +42,8 @@ function viewVoices() {
     : v.err ? `<div class="search-hint err">${esc(v.err)}</div>`
     : v.list.length ? v.list.map(voiceRow).join('')
     : '<div class="empty"><div class="big">没有找到声音</div><div>换个歌试试</div></div>';
-  return backBar('匹配声音') + head + body +
-    '<div class="search-hint" style="margin-top:14px">共 ' + v.list.length + ' 个可下载声音</div>';
+  return `<div class="page-shell">${backBar('匹配声音')}${head}${body}
+    <div class="search-hint" style="margin-top:14px">共 ${v.list.length} 个可下载声音</div></div>`;
 }
 
 function openNpSheet() {

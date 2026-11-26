@@ -167,7 +167,7 @@ function candPanel(it, i) {
           const subTxt = [v.dj ? 'by ' + v.dj : '', v.radio || '未知电台'].filter(Boolean).join(' · ');
           return `<div class="imp-cand${sel ? ' sel' : ''}${s.bad ? ' bad' : ''}" role="button" tabindex="0" data-imp-pick="${i}" data-pick="${k}">
             <div class="imp-cand-cover" style="background-image:url('${esc(v.cover || '')}')">
-              <button class="imp-cand-play${on ? ' on' : ''}" data-imp-play="${i}:${k}" aria-label="试听">${on ? '❚❚' : '▶'}</button>
+              <button class="imp-cand-play${on ? ' on' : ''}" data-imp-play="${i}:${k}" aria-label="试听">${ico(on ? 'pause' : 'play', '', true)}</button>
             </div>
             <div class="imp-cand-title">${esc(v.title || '未命名声音')}</div>
             <div class="imp-cand-sub">${esc(subTxt)}</div>
@@ -335,7 +335,7 @@ function viewImport() {
       <button class="sort-pill${imp.filter === 'done' ? ' on' : ''}" data-imp-filter="done">已下载 (${doneCnt})</button>
       ${errCnt ? `<button class="sort-pill${imp.filter === 'err' ? ' on' : ''}" data-imp-filter="err">异常 (${errCnt})</button>` : ''}
     </div>` : '';
-  return backBar('批量导入') + `
+  return `<div class="page-shell">${backBar('批量导入')}
     <div class="imp-bar">
       <input id="impLink" placeholder="https://music.163.com/playlist?id=..." value="${esc(imp.link)}">
       <button id="impGo" class="dl-btn" ${imp.loading ? 'disabled' : ''}>${total ? '重新解析' : '解析'}</button>
@@ -351,7 +351,7 @@ function viewImport() {
       ${!imp.matching && miss > 0 && !imp.busy ? '<button id="impMatchResume" class="dl-btn ghost">继续匹配未完成项</button>' : ''}
       ${imp.busy ? '<button id="impStop" class="dl-btn ghost">停止下载</button>' : ''}
     </div>
-    ${body}`;
+    ${body}</div>`;
 }
 
 /** 分片渐进挂载超长导入列表，保证切入「批量导入」首帧 < 5ms 不掉帧 */

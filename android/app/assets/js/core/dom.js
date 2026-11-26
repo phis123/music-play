@@ -17,6 +17,9 @@ const esc = (s) => String(s == null ? '' : s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;');
 
+const ico = (name, cls, fill) =>
+  `<svg class="ico${cls ? ' ' + cls : ''}" viewBox="0 0 24 24"${fill ? ` fill="${fill}"` : ''} aria-hidden="true"><use href="#ico-${name}"/></svg>`;
+
 function toast(m) { if (A) A.toast(m); }
 
 /* ---------------- 存储权限（Android 11+ 删/写共享存储必需） ---------------- */
@@ -28,4 +31,4 @@ function askStorage() { openSheet('storage'); }
 
 const mbStr = (got, total) => (got / 1048576).toFixed(1) + 'M' + (total > 0 ? '/' + (total / 1048576).toFixed(1) + 'M' : '');
 
-window.MP.dom = { $: $, fmt: fmt, esc: esc, toast: toast };
+window.MP.dom = { $: $, fmt: fmt, esc: esc, ico: ico, toast: toast };

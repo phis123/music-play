@@ -56,11 +56,9 @@ function paintCovers(rootEl) {
 
 function syncTabs() {
   document.querySelectorAll('[data-tab]').forEach((el) => {
-    // 只有停在「首页/个人」这一层时高亮；进入本地音乐等子页后不该还亮着
     el.classList.toggle('active', S.page.name === el.dataset.tab);
   });
-  // 平板侧栏里的二级导航（本地音乐/我喜欢/最近/歌单/批量导入）高亮
-  document.querySelectorAll('.rail-item[data-go]').forEach((el) => {
+  document.querySelectorAll('.rail-item[data-go], .tab[data-go]').forEach((el) => {
     el.classList.toggle('active', S.page.name === el.dataset.go);
   });
 }
